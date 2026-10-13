@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.fieldrecord.presentation.camera.PhotoFileManagerTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-10-13T09:04:50" hostname="treasure-island" time="0.025">
+  <properties/>
+  <testcase name="monthlySequenceCountsPhotosAcrossDifferentDatesInSameMonth" classname="com.fieldrecord.presentation.camera.PhotoFileManagerTest" time="0.003"/>
+  <testcase name="sequenceMayExceedThreeDigitsWithoutCollision" classname="com.fieldrecord.presentation.camera.PhotoFileManagerTest" time="0.012"/>
+  <testcase name="filenameUsesCalendarDateAndThreeDigitSequence" classname="com.fieldrecord.presentation.camera.PhotoFileManagerTest" time="0.004"/>
+  <testcase name="monthlySequenceResetsToOneOnNewMonth" classname="com.fieldrecord.presentation.camera.PhotoFileManagerTest" time="0.003"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

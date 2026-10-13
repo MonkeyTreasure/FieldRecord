@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <files-path name="field_record_files" path="Field Records/" />
+    <external-path name="field_record_photo" path="FieldRecord/Photo/" />
+    <cache-path name="field_record_cache" path="." />
+</paths>

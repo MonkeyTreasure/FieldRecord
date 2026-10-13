@@ -1,0 +1,284 @@
+package com.fieldrecord.presentation.gallery
+
+import android.content.Intent
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.border
+import androidx.compose.foundation.lazy.grid.*
+import androidx.compose.material.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.runtime.*
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
+import androidx.paging.compose.collectAsLazyPagingItems
+import coil.compose.rememberAsyncImagePainter
+import com.fieldrecord.domain.model.FieldPhoto
+import com.fieldrecord.presentation.photo.PhotoFullscreenViewer
+import java.io.File
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun GalleryScreen(
+    viewModel: GalleryViewModel
+) {
+    val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
+    val lazyPagingItems = viewModel.pager.collectAsLazyPagingItems()
+    val monthLabel = viewModel.getCurrentMonthLabel()
+    var selectedIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var fullscreenPhotos by remember { mutableStateOf<List<FieldPhoto>?>(null) }
+    var fullscreenIndex by remember { mutableIntStateOf(0) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    var pendingCsvContent by remember { mutableStateOf<String?>(null) }
+    var isPreparingCsv by remember { mutableStateOf(false) }
+    val csvDocumentLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri ->
+        val csv = pendingCsvContent
+        pendingCsvContent = null
+        if (uri != null && csv != null) {
+            scope.launch {
+                try {
+                    val written = withContext(Dispatchers.IO) {
+                        context.contentResolver.openOutputStream(uri)?.use { output ->
+                            output.write(csv.toByteArray(Charsets.UTF_8))
+                            true
+                        } ?: false
+                    }
+                    Toast.makeText(
+                        context,
+                        if (written) "CSV note berhasil disimpan" else "File CSV tidak dapat dibuat",
+                        if (written) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
+                    ).show()
+                } catch (error: Exception) {
+                    Toast.makeText(context, "Ekspor CSV gagal: ${error.message ?: "kesalahan penyimpanan"}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    val loadedPhotos = remember(lazyPagingItems.itemCount) {
+        buildList {
+            for (i in 0 until lazyPagingItems.itemCount) {
+                lazyPagingItems.peek(i)?.let { add(it) }
+            }
+        }
+    }
+    val chronologicalPhotos = remember(loadedPhotos) { loadedPhotos.sortedBy { it.timestamp } }
+    val selectionMode = selectedIds.isNotEmpty()
+
+    LaunchedEffect(Unit) {
+        viewModel.syncPhotosFromStorage(context)
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Sticky header — tidak ikut scroll
+            androidx.compose.material.Surface(elevation = 4.dp) {
+                if (selectionMode) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("${selectedIds.size} dipilih", color = MaterialTheme.colors.onSurface)
+                        Row {
+                            IconButton(onClick = {
+                                val selected = loadedPhotos.filter { it.id in selectedIds }
+                                sharePhotosToWhatsApp(context, selected)
+                            }) { Icon(Icons.Default.Share, "Bagikan ke WhatsApp") }
+                            IconButton(onClick = {
+                                selectedIds = if (selectedIds.size == loadedPhotos.size) emptySet()
+                                else loadedPhotos.map { it.id }.toSet()
+                            }) { Icon(Icons.Default.SelectAll, "Pilih semua") }
+                            IconButton(onClick = { showDeleteConfirm = true }) {
+                                Icon(Icons.Default.Delete, "Hapus foto terpilih", tint = MaterialTheme.colors.error)
+                            }
+                            IconButton(onClick = { selectedIds = emptySet() }) {
+                                Icon(Icons.Default.Close, "Batalkan pilihan")
+                            }
+                        }
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(monthLabel, style = MaterialTheme.typography.subtitle1)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            IconButton(
+                                enabled = !isPreparingCsv,
+                                onClick = {
+                                    scope.launch {
+                                        isPreparingCsv = true
+                                        try {
+                                            val csv = viewModel.exportPhotoNotesCsv()
+                                            if (csv == null) {
+                                                Toast.makeText(context, "Belum ada foto dengan note untuk diekspor", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                pendingCsvContent = "\uFEFF$csv"
+                                                csvDocumentLauncher.launch("FieldRecord_photo_notes.csv")
+                                            }
+                                        } catch (error: Exception) {
+                                            Toast.makeText(context, "Gagal menyiapkan CSV: ${error.message ?: "kesalahan data"}", Toast.LENGTH_LONG).show()
+                                        } finally {
+                                            isPreparingCsv = false
+                                        }
+                                    }
+                                }
+                            ) {
+                                Icon(Icons.Default.FileDownload, contentDescription = "Ekspor note foto ke CSV")
+                            }
+                            IconButton(onClick = { viewModel.previousMonth() }) {
+                                Icon(Icons.Default.ChevronLeft, "Bulan sebelumnya")
+                            }
+                            IconButton(onClick = { viewModel.nextMonth() }) {
+                                Icon(Icons.Default.ChevronRight, "Bulan berikutnya")
+                            }
+                        }
+                    }
+                }
+            }
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(3),
+                contentPadding = PaddingValues(4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.weight(1f).fillMaxWidth()
+            ) {
+                items(lazyPagingItems.itemCount, key = { index -> lazyPagingItems.peek(index)?.id ?: index }) { index ->
+                val photo = lazyPagingItems[index] ?: return@items
+                val selected = photo.id in selectedIds
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1f)
+                        .border(
+                        width = if (selected) 3.dp else 0.dp,
+                        color = if (selected) GallerySelectionTheme.borderColor else Color.Transparent,
+                        shape = RoundedCornerShape(4.dp)
+                    )
+                    .combinedClickable(
+                            onClick = {
+                                if (selectionMode) {
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    selectedIds = if (selected) selectedIds - photo.id else selectedIds + photo.id
+                                } else {
+                                    fullscreenPhotos = chronologicalPhotos
+                                    fullscreenIndex = chronologicalPhotos.indexOfFirst { it.id == photo.id }.coerceAtLeast(0)
+                                }
+                            },
+                            onLongClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                selectedIds = if (selected) selectedIds - photo.id else selectedIds + photo.id
+                            }
+                        ),
+                    backgroundColor = if (selected) Color(0xFF2E7D32).copy(alpha = 0.7f) else MaterialTheme.colors.surface,
+                    elevation = 2.dp
+                ) {
+                    androidx.compose.foundation.Image(
+                        painter = rememberAsyncImagePainter(File(photo.filePath)),
+                        contentDescription = photo.fileName,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+            }
+        }
+        }
+
+        if (showDeleteConfirm) {
+            AlertDialog(
+                onDismissRequest = { showDeleteConfirm = false },
+                title = { Text("Hapus foto terpilih?") },
+                text = { Text("${selectedIds.size} foto akan dihapus permanen dari galeri dan penyimpanan aplikasi.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val targets = loadedPhotos.filter { it.id in selectedIds }
+                        showDeleteConfirm = false
+                        scope.launch {
+                            viewModel.deleteSelected(targets)
+                            selectedIds = emptySet()
+                            lazyPagingItems.refresh()
+                        }
+                    }) { Text("Hapus", color = MaterialTheme.colors.error) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteConfirm = false }) { Text("Batal") }
+                }
+            )
+        }
+
+        fullscreenPhotos?.let { photos ->
+            PhotoFullscreenViewer(
+                photos = photos,
+                initialIndex = fullscreenIndex,
+                knownTags = lazyPagingItems.itemSnapshotList.items.filterNotNull().flatMap { com.fieldrecord.domain.model.extractPhotoTags(it.note) }.toSet(),
+                onSaveNote = { photoId, note ->
+                    viewModel.updatePhotoNote(photoId, note)
+                    lazyPagingItems.refresh()
+                },
+                onDismiss = { fullscreenPhotos = null }
+            )
+        }
+    }
+}
+
+private fun sharePhotosToWhatsApp(context: android.content.Context, photos: List<FieldPhoto>) {
+    if (photos.isEmpty()) return
+    val uris = photos.mapNotNull { photo ->
+        val file = File(photo.filePath)
+        if (!file.exists()) null else FileProvider.getUriForFile(
+            context, "${context.packageName}.fileprovider", file
+        )
+    }
+    if (uris.isEmpty()) return
+    val combinedText = photos.joinToString(separator = "\n\n---\n\n") { photo ->
+        buildString {
+            append("Koordinat: ${photo.latitude}, ${photo.longitude}")
+            if (!photo.note.isNullOrBlank()) {
+                append("\n\n").append(photo.note)
+            }
+        }
+    }
+    val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+        type = "image/jpeg"
+        putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
+        putExtra(Intent.EXTRA_TEXT, combinedText)
+        setPackage("com.whatsapp")
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    try {
+        context.startActivity(intent)
+    } catch (_: Exception) {
+        val fallback = Intent.createChooser(intent, "Bagikan foto")
+        fallback.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        context.startActivity(fallback)
+    }
+}

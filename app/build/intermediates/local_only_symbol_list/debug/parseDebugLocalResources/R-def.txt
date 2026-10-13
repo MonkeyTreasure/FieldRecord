@@ -1,0 +1,13 @@
+R_DEF: Internal format may change without notice
+local
+color amber
+color amber_dark
+color black
+color emerald
+color emerald_dark
+color white
+mipmap ic_launcher
+mipmap ic_launcher_round
+string app_name
+style Theme.FieldRecord
+xml file_paths

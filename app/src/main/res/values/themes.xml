@@ -1,0 +1,4 @@
+<resources>
+    <style name="Theme.FieldRecord" parent="android:Theme.Material.Light.NoActionBar">
+    </style>
+</resources>
