@@ -7,9 +7,9 @@ import android.graphics.Canvas
 import android.graphics.Color as AndroidColor
 import android.graphics.Paint
 import android.graphics.Typeface
-import android.media.ExifInterface
-import android.os.Environment
-import androidx.camera.core.ImageProxy
+import android.widget.Toast
+import android.content.Intent
+import android.net.Uri
 import com.fieldrecord.domain.model.FieldPhoto
 import java.io.File
 import java.io.FileOutputStream
@@ -235,4 +235,22 @@ object PhotoFileManager {
     }
 
     fun imageProxyToBitmap(image: ImageProxy): Bitmap? = null
+
+    fun shareToWhatsApp(context: Context, imageUri: Uri, lat: Double, lon: Double, note: String) {
+        val mapsUrl = "https://maps.google.com/?q=$lat,$lon"
+        val text = "📍 *FieldRecord Share*\n\n📝 Catatan: $note\n🌐 Lokasi: $mapsUrl"
+        
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "image/*"
+            putExtra(Intent.EXTRA_STREAM, imageUri)
+            putExtra(Intent.EXTRA_TEXT, text)
+            setPackage("com.whatsapp")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        try {
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(context, "WhatsApp tidak terinstal", Toast.LENGTH_SHORT).show()
+        }
+    }
 }
