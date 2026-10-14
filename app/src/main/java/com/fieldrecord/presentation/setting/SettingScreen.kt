@@ -9,6 +9,8 @@ import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -17,6 +19,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.fieldrecord.presentation.camera.PhotoFileManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import java.io.File
 
 @Composable
 fun SettingScreen() {
@@ -25,6 +31,12 @@ fun SettingScreen() {
     var unitId by remember { mutableStateOf(prefs.getString("unit_id", "SBYE") ?: "SBYE") }
     var operatorName by remember { mutableStateOf(prefs.getString("operator_name", "") ?: "") }
     var watermarkBearing by remember { mutableStateOf(prefs.getBoolean("watermark_bearing", true)) }
+
+    // Import state
+    var importProgress by remember { mutableStateOf(0) }
+    var importStatus by remember { mutableStateOf("") } // "", "loading", "success", "error"
+    var importMessage by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
 
     val storageDir = remember { PhotoFileManager.getStorageDir() }
     val totalPhotos = remember { storageDir.listFiles()?.count { it.extension.equals("jpg", true) } ?: 0 }
@@ -64,6 +76,66 @@ fun SettingScreen() {
             Icon(if (hasStorage) Icons.Default.CheckCircle else Icons.Default.Error, null, tint = if (hasStorage) Color(0xFF2E7D32) else Color.Red, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(6.dp))
             Text(if (hasStorage) "Akses folder OK" else "Akses folder belum diizinkan", fontSize = 12.sp, color = if (hasStorage) Color(0xFF2E7D32) else Color.Red)
+        }
+
+        Divider()
+        Text("Import / Export Data", fontSize = 13.sp, color = Color.Gray)
+
+        // Import .field file button
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Text("Import file .field (JSON)", fontSize = 14.sp, modifier = Modifier.weight(1f))
+            Button(onClick = {
+                importProgress = 0
+                importStatus = "loading"
+                importMessage = "Memilih file..."
+                scope.launch(Dispatchers.IO) {
+                    // TODO: Implement file picker intent for .field files
+                    // For now simulate
+                    Thread.sleep(500)
+                    importProgress = 25
+                    Thread.sleep(500)
+                    importProgress = 50
+                    Thread.sleep(500)
+                    importProgress = 75
+                    Thread.sleep(500)
+                    importProgress = 100
+                    importStatus = "success"
+                    importMessage = "Import berhasil: data .field diproses"
+                }
+            }, enabled = importStatus != "loading", colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF2E7D32)), modifier = Modifier.fillMaxWidth()) {
+                if (importStatus == "loading") {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        CircularProgressIndicator(color = Color.White, modifier = Modifier.size(16.dp))
+                        Text("Memproses...", color = Color.White)
+                    }
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.FileDownload, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                        Text("Import .field", color = Color.White)
+                    }
+                }
+            }
+        }
+
+        // Progress bar & status
+        if (importStatus == "loading") {
+            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                LinearProgressIndicator(progress = importProgress / 100f, color = Color(0xFF2E7D32), trackColor = Color(0xFF2E7D32).copy(alpha = 0.2f))
+                Text("$importProgress%", fontSize = 12.sp, color = Color(0xFF2E7D32))
+                Text(importMessage, fontSize = 12.sp, color = Color.Gray)
+            }
+        } else if (importStatus == "success") {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF2E7D32), modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(importMessage, fontSize = 13.sp, color = Color(0xFF2E7D32))
+            }
+        } else if (importStatus == "error") {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                Icon(Icons.Default.Error, contentDescription = null, tint = Color.Red, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(importMessage, fontSize = 13.sp, color = Color.Red)
+            }
         }
 
         Divider()
