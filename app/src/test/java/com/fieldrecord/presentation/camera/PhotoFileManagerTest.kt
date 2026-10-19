@@ -5,6 +5,25 @@ import org.junit.Test
 
 class PhotoFileManagerTest {
     @Test
+    fun videoFilenameUsesVideoPrefixAndThreeDigitSequence() {
+        assertEquals("VID_260925_001.mp4", PhotoFileManager.formatVideoFilename("260925", 1))
+        assertEquals("VID_260925_1000.mp4", PhotoFileManager.formatVideoFilename("260925", 1000))
+    }
+
+    @Test
+    fun videoSequenceResetsOnNewMonthAndSkipsExistingNumbers() {
+        val files = listOf("VID_261031_018.mp4", "VID_261031_019.mp4", "VID_261101_002.mp4")
+        assertEquals(3, PhotoFileManager.nextMonthlyVideoSequence("261102", files))
+        assertEquals(1, PhotoFileManager.nextMonthlyVideoSequence("261201", files))
+    }
+
+    @Test
+    fun videoSequenceHandlesGapsWithoutColliding() {
+        val files = listOf("VID_261001_001.mp4", "VID_261005_005.mp4")
+        assertEquals(6, PhotoFileManager.nextMonthlyVideoSequence("261006", files))
+    }
+
+    @Test
     fun filenameUsesCalendarDateAndThreeDigitSequence() {
         assertEquals("IMG_260925_001.jpg", PhotoFileManager.formatFilename("260925", 1))
         assertEquals("IMG_260925_027.jpg", PhotoFileManager.formatFilename("260925", 27))

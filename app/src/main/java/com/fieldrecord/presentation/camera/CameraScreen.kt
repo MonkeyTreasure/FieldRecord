@@ -2,6 +2,8 @@ package com.fieldrecord.presentation.camera
 
 import com.fieldrecord.LocalAppIconColor
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -15,8 +17,20 @@ import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
 import androidx.camera.core.ZoomState
+import androidx.camera.video.FallbackStrategy
+import androidx.camera.video.FileOutputOptions
+import androidx.camera.video.Quality
+import androidx.camera.video.QualitySelector
+import androidx.camera.video.Recorder
+import androidx.camera.video.Recording
+import androidx.camera.video.VideoCapture
+import androidx.camera.video.VideoRecordEvent
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -159,6 +173,12 @@ fun CameraScreen(
         PreviewView(context).apply { implementationMode = PreviewView.ImplementationMode.COMPATIBLE }
     }
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
+    var videoCapture by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
+    var activeRecording by remember { mutableStateOf<Recording?>(null) }
+    var isStartingVideo by remember { mutableStateOf(false) }
+    var isRecording by remember { mutableStateOf(false) }
+    var recordingStartedAt by remember { mutableStateOf<Long?>(null) }
+    var recordingDurationSeconds by remember { mutableIntStateOf(0) }
     var previewUseCase by remember { mutableStateOf<Preview?>(null) }
     var camera by remember { mutableStateOf<Camera?>(null) }
     var cameraProviderRef by remember { mutableStateOf<ProcessCameraProvider?>(null) }
@@ -203,6 +223,7 @@ fun CameraScreen(
         watermarkBackgroundAlpha = prefs.getFloat("watermark_background_alpha", 0.45f)
     }
     var lastPhoto by remember { mutableStateOf<FieldPhoto?>(null) }
+    var latestVideoFile by remember { mutableStateOf<File?>(null) }
     var showLastPhoto by remember { mutableStateOf(false) }
     var cameraPhotos by remember { mutableStateOf<List<FieldPhoto>>(emptyList()) }
     var fullscreenPhotoIndex by remember { mutableIntStateOf(0) }
@@ -250,6 +271,7 @@ fun CameraScreen(
         val existing = withContext(Dispatchers.IO) { PhotoFileManager.findPhotos(context) }
         cameraPhotos = existing
         if (lastPhoto == null) lastPhoto = existing.firstOrNull()
+        latestVideoFile = withContext(Dispatchers.IO) { PhotoFileManager.findLatestVideo() }
     }
 
     DisposableEffect(context) {
@@ -268,8 +290,9 @@ fun CameraScreen(
         onDispose { listener.disable() }
     }
 
-    LaunchedEffect(targetRotation) {
+    LaunchedEffect(targetRotation, imageCapture, videoCapture) {
         imageCapture?.targetRotation = targetRotation
+        videoCapture?.targetRotation = targetRotation
     }
 
     LaunchedEffect(flashSetting, imageCapture) {
@@ -285,31 +308,58 @@ fun CameraScreen(
                 .also { it.setSurfaceProvider(previewView.surfaceProvider) }
         }
     }
-    LaunchedEffect(previewUseCase, lensFacing, prioritizeQuality, lifecycleOwner) {
+    LaunchedEffect(previewUseCase, lensFacing, prioritizeQuality, lifecycleOwner, isVideoMode) {
         val preview = previewUseCase ?: return@LaunchedEffect
         val provider = cameraProviderFuture.get()
         cameraProviderRef = provider
         val oldCapture = imageCapture
+        val oldVideoCapture = videoCapture
         val previousLens = camera?.cameraInfo?.lensFacing ?: lensFacing
         try {
-            if (isCameraBound) provider.unbind(*listOfNotNull(preview, oldCapture).toTypedArray())
-            val capture = ImageCapture.Builder()
-                .setTargetRotation(targetRotation)
-                .setCaptureMode(if (prioritizeQuality) ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY else ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                .setFlashMode(flashSetting.toImageCaptureFlashMode())
-                .build()
+            if (isCameraBound) {
+                provider.unbind(*listOfNotNull(preview, oldCapture, oldVideoCapture).toTypedArray())
+            }
             val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
-            val boundCamera = provider.bindToLifecycle(lifecycleOwner, selector, preview, capture)
+            val boundCamera = if (isVideoMode) {
+                val recorder = Recorder.Builder()
+                    .setQualitySelector(
+                        QualitySelector.from(
+                            Quality.HD,
+                            FallbackStrategy.lowerQualityOrHigherThan(Quality.SD)
+                        )
+                    )
+                    .build()
+                val capture = VideoCapture.withOutput(recorder).apply { targetRotation = targetRotation }
+                val bound = provider.bindToLifecycle(lifecycleOwner, selector, preview, capture)
+                videoCapture = capture
+                imageCapture = null
+                bound
+            } else {
+                val capture = ImageCapture.Builder()
+                    .setTargetRotation(targetRotation)
+                    .setCaptureMode(if (prioritizeQuality) ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY else ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                    .setFlashMode(flashSetting.toImageCaptureFlashMode())
+                    .build()
+                val bound = provider.bindToLifecycle(lifecycleOwner, selector, preview, capture)
+                imageCapture = capture
+                videoCapture = null
+                bound
+            }
             isCameraBound = true
             camera = boundCamera
-            imageCapture = capture
             zoomState = boundCamera.cameraInfo.zoomState.value
             zoomRatio = zoomState?.zoomRatio ?: 1f
             exposureIndex = boundCamera.cameraInfo.exposureState.exposureCompensationIndex
         } catch (e: Exception) {
             camera = null
+            imageCapture = null
+            videoCapture = null
             isCameraBound = false
-            if (lensFacing != previousLens) {
+            if (isVideoMode) {
+                android.util.Log.e("FieldRecordCamera", "Video mode bind failed; restoring photo mode", e)
+                android.widget.Toast.makeText(context, "Mode video tidak tersedia: ${e.message ?: "gunakan perangkat lain"}", android.widget.Toast.LENGTH_LONG).show()
+                isVideoMode = false
+            } else if (lensFacing != previousLens) {
                 android.util.Log.e("FieldRecordCamera", "Camera switch failed; restoring previous lens", e)
                 android.widget.Toast.makeText(context, "Kamera gagal beralih; mengembalikan kamera sebelumnya", android.widget.Toast.LENGTH_SHORT).show()
                 lensFacing = previousLens
@@ -320,8 +370,102 @@ fun CameraScreen(
         }
     }
 
+    val startVideoRecording: (Boolean) -> Unit = { withAudio ->
+        val capture = videoCapture
+        if (capture == null || isRecording || isStartingVideo) {
+            android.widget.Toast.makeText(context, "Kamera video belum siap", android.widget.Toast.LENGTH_SHORT).show()
+        } else {
+            isStartingVideo = true
+            captureScope.launch {
+                val outputFile = withContext(Dispatchers.IO) {
+                    runCatching { PhotoFileManager.getOutputVideoFile() }.getOrNull()
+                }
+                if (outputFile == null) {
+                    isStartingVideo = false
+                    android.widget.Toast.makeText(context, "Folder video tidak dapat dibuat", android.widget.Toast.LENGTH_LONG).show()
+                } else {
+                    try {
+                        var pending = capture.output.prepareRecording(
+                            context,
+                            FileOutputOptions.Builder(outputFile).build()
+                        )
+                        if (withAudio) pending = pending.withAudioEnabled()
+                        activeRecording = pending.start(ContextCompat.getMainExecutor(context)) { event ->
+                            when (event) {
+                                is VideoRecordEvent.Start -> {
+                                    recordingStartedAt = System.currentTimeMillis()
+                                    isRecording = true
+                                }
+                                is VideoRecordEvent.Finalize -> {
+                                    activeRecording = null
+                                    isStartingVideo = false
+                                    isRecording = false
+                                    recordingStartedAt = null
+                                    recordingDurationSeconds = 0
+                                    if (event.error == VideoRecordEvent.Finalize.ERROR_NONE && outputFile.exists() && outputFile.length() > 0L) {
+                                        latestVideoFile = outputFile
+                                        android.widget.Toast.makeText(context, "Video tersimpan: ${outputFile.name}", android.widget.Toast.LENGTH_LONG).show()
+                                    } else {
+                                        outputFile.delete()
+                                        android.widget.Toast.makeText(context, "Perekaman video gagal (${event.error})", android.widget.Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            }
+                        }
+                        isStartingVideo = false
+                        isRecording = true
+                    } catch (error: Exception) {
+                        outputFile.delete()
+                        activeRecording = null
+                        isStartingVideo = false
+                        isRecording = false
+                        android.util.Log.e("FieldRecordCamera", "Video recording start failed", error)
+                        android.widget.Toast.makeText(context, "Video gagal dimulai: ${error.message ?: "periksa izin mikrofon"}", android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        }
+    }
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (!granted) {
+            android.widget.Toast.makeText(context, "Izin mikrofon ditolak; video direkam tanpa audio", android.widget.Toast.LENGTH_LONG).show()
+        }
+        startVideoRecording(granted)
+    }
+
+    val openLatestVideo: () -> Unit = {
+        val file = latestVideoFile
+        if (file == null || !file.exists()) {
+            android.widget.Toast.makeText(context, "Belum ada video tersimpan", android.widget.Toast.LENGTH_SHORT).show()
+        } else {
+            try {
+                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, "video/mp4")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(Intent.createChooser(intent, "Putar video"))
+            } catch (error: Exception) {
+                android.util.Log.e("FieldRecordCamera", "Unable to open recorded video", error)
+                android.widget.Toast.makeText(context, "Tidak ada pemutar video yang tersedia", android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    LaunchedEffect(recordingStartedAt) {
+        val startTime = recordingStartedAt ?: return@LaunchedEffect
+        while (true) {
+            recordingDurationSeconds = ((System.currentTimeMillis() - startTime) / 1_000L).toInt()
+            delay(500L)
+        }
+    }
+
+    val currentRecording by rememberUpdatedState(activeRecording)
     DisposableEffect(lifecycleOwner) {
         onDispose {
+            currentRecording?.stop()
             cameraProviderRef?.unbindAll()
             isCameraBound = false
         }
@@ -440,6 +584,19 @@ fun CameraScreen(
                 }
             }
             CameraTelemetryOverlay(gpsLocation, compassDegrees, Modifier.fillMaxSize())
+            if (isRecording) {
+                Row(
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 12.dp)
+                        .background(Color.Black.copy(alpha = 0.72f), RoundedCornerShape(18.dp)).padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(Modifier.size(9.dp).background(Color.Red, CircleShape))
+                    val minutes = recordingDurationSeconds / 60
+                    val seconds = recordingDurationSeconds % 60
+                    Text("REC %02d:%02d".format(minutes, seconds), color = Color.White, style = MaterialTheme.typography.caption)
+                }
+            }
             // Horizon level overlay
             if (kotlin.math.abs(horizonRoll) < 5f && kotlin.math.abs(horizonPitch) < 5f) {
                 Canvas(Modifier.fillMaxSize().padding(16.dp)) {
@@ -525,7 +682,7 @@ fun CameraScreen(
                     IconButton(onClick = { gridEnabled = !gridEnabled; preferences.edit().putBoolean("grid", gridEnabled).apply() }) {
                         Icon(Icons.Default.Grid3x3, contentDescription = if (gridEnabled) "Grid aktif" else "Grid nonaktif", tint = if (gridEnabled) MaterialTheme.colors.primary else LocalAppIconColor.current)
                     }
-                    IconButton(onClick = { prioritizeQuality = !prioritizeQuality; preferences.edit().putBoolean("quality", prioritizeQuality).apply() }) {
+                    IconButton(enabled = !isRecording && !isStartingVideo && !isCapturing && countdown == 0, onClick = { prioritizeQuality = !prioritizeQuality; preferences.edit().putBoolean("quality", prioritizeQuality).apply() }) {
                         Icon(if (prioritizeQuality) Icons.Default.HighQuality else Icons.Default.Speed, contentDescription = if (prioritizeQuality) "Kualitas tinggi" else "Mode cepat", tint = if (prioritizeQuality) MaterialTheme.colors.primary else LocalAppIconColor.current)
                     }
                     IconButton(onClick = { showExposureControl = !showExposureControl }) {
@@ -554,48 +711,102 @@ fun CameraScreen(
                 }
             }
 
-            Row(
+            Column(
                 modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                lastPhoto?.let { photo ->
-                    Image(
-                        painter = rememberAsyncImagePainter(File(photo.filePath)),
-                        contentDescription = "Lihat foto terakhir",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.size(56.dp).clip(CircleShape)
-                            .clickable {
-                                fullscreenPhotoIndex = cameraViewerPhotos.lastIndex.coerceAtLeast(0)
-                                showLastPhoto = true
-                            }
-                    )
-                } ?: IconButton(onClick = {}) {
-                    Icon(Icons.Default.PhotoLibrary, null, tint = LocalAppIconColor.current)
-                }
-                
-                Button(
-                    onClick = {
-                        if (!isVideoMode) {
-                            startCapture()
-                        } else {
-                            android.widget.Toast.makeText(context, "Mode video segera aktif", android.widget.Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    enabled = !isCapturing && countdown == 0 && imageCapture != null,
-                    modifier = Modifier.size(80.dp).border(4.dp, MaterialTheme.colors.primary, CircleShape),
-                    shape = CircleShape,
-                    colors = ButtonDefaults.buttonColors(backgroundColor = if (isVideoMode) Color.Red else MaterialTheme.colors.primary)
-                ) { }
-                IconButton(
-                    onClick = {
-                        val nextLens = if (lensFacing == CameraSelector.LENS_FACING_BACK) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
-                        val provider = cameraProviderRef
-                        val selector = CameraSelector.Builder().requireLensFacing(nextLens).build()
-                        if (provider != null && provider.hasCamera(selector)) lensFacing = nextLens
-                        else android.widget.Toast.makeText(context, "Kamera depan/belakang tidak tersedia", android.widget.Toast.LENGTH_SHORT).show()
+                Row(
+                    modifier = Modifier.background(Color.Black.copy(alpha = 0.38f), RoundedCornerShape(24.dp)).padding(3.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(
+                        enabled = !isRecording && !isStartingVideo && !isCapturing && countdown == 0,
+                        onClick = { isVideoMode = false },
+                        modifier = Modifier.background(if (!isVideoMode) MaterialTheme.colors.primary else Color.Transparent, RoundedCornerShape(20.dp))
+                    ) {
+                        Icon(Icons.Default.PhotoCamera, contentDescription = null, tint = Color.White)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Foto", color = Color.White)
                     }
-                ) { Icon(Icons.Default.Cameraswitch, "Ganti kamera", tint = LocalAppIconColor.current) }
+                    TextButton(
+                        enabled = !isRecording && !isStartingVideo && !isCapturing && countdown == 0,
+                        onClick = { isVideoMode = true },
+                        modifier = Modifier.background(if (isVideoMode) Color.Red else Color.Transparent, RoundedCornerShape(20.dp))
+                    ) {
+                        Icon(Icons.Default.Videocam, contentDescription = null, tint = Color.White)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Video", color = Color.White)
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (latestVideoFile != null) {
+                        Box(
+                            Modifier.size(56.dp).clip(CircleShape).background(Color.DarkGray)
+                                .clickable(enabled = !isRecording && !isStartingVideo && !isCapturing && countdown == 0, onClick = openLatestVideo),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Videocam, contentDescription = "Putar video terakhir", tint = Color.White)
+                        }
+                    } else if (lastPhoto != null) {
+                        val photo = lastPhoto!!
+                        Image(
+                            painter = rememberAsyncImagePainter(File(photo.filePath)),
+                            contentDescription = "Lihat foto terakhir",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.size(56.dp).clip(CircleShape)
+                                .clickable(enabled = !isRecording) {
+                                    fullscreenPhotoIndex = cameraViewerPhotos.lastIndex.coerceAtLeast(0)
+                                    showLastPhoto = true
+                                }
+                        )
+                    } else {
+                        IconButton(onClick = {}, enabled = false) {
+                            Icon(Icons.Default.PhotoLibrary, null, tint = LocalAppIconColor.current)
+                        }
+                    }
+
+                    Button(
+                        onClick = {
+                            if (!isVideoMode) {
+                                startCapture()
+                            } else if (isRecording) {
+                                activeRecording?.stop()
+                            } else if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                                startVideoRecording(true)
+                            } else {
+                                audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                            }
+                        },
+                        enabled = !isCapturing && !isStartingVideo && countdown == 0 && (if (isVideoMode) videoCapture != null else imageCapture != null),
+                        modifier = Modifier.size(80.dp).border(4.dp, if (isVideoMode) Color.Red else MaterialTheme.colors.primary, CircleShape),
+                        shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(backgroundColor = if (isVideoMode) Color.Red else MaterialTheme.colors.primary)
+                    ) {
+                        Box(
+                            Modifier.size(if (isRecording) 24.dp else 40.dp)
+                                .background(
+                                    if (isRecording) Color.White else if (isVideoMode) Color.Red else Color.White,
+                                    if (isRecording) RoundedCornerShape(5.dp) else CircleShape
+                                )
+                        )
+                    }
+                    IconButton(
+                        enabled = !isRecording && !isStartingVideo && !isCapturing && countdown == 0,
+                        onClick = {
+                            val nextLens = if (lensFacing == CameraSelector.LENS_FACING_BACK) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
+                            val provider = cameraProviderRef
+                            val selector = CameraSelector.Builder().requireLensFacing(nextLens).build()
+                            if (provider != null && provider.hasCamera(selector)) lensFacing = nextLens
+                            else android.widget.Toast.makeText(context, "Kamera depan/belakang tidak tersedia", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    ) { Icon(Icons.Default.Cameraswitch, "Ganti kamera", tint = LocalAppIconColor.current) }
+                }
             }
         }
         if (showLastPhoto) {

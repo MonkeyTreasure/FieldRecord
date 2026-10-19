@@ -150,6 +150,13 @@ object PhotoFileManager {
 
     fun findLatestPhoto(context: Context): FieldPhoto? = findPhotos(context).firstOrNull()
 
+    fun findVideos(): List<File> = getVideoStorageDir().listFiles()
+        ?.filter { it.isFile && videoFilenamePattern.matches(it.name) }
+        ?.sortedByDescending { it.lastModified() }
+        .orEmpty()
+
+    fun findLatestVideo(): File? = findVideos().firstOrNull()
+
     private fun readPhotoMetadata(file: File): FieldPhoto? {
         var latitude = 0.0
         var longitude = 0.0
