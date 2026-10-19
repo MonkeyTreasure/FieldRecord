@@ -2,7 +2,7 @@ package com.fieldrecord.presentation.camera
 
 import com.fieldrecord.LocalAppIconColor
 import android.content.Context
-import android.content.Intent
+import androidx.core.content.ContextCompat
 import android.content.pm.PackageManager
 import android.graphics.Color as AndroidColor
 import android.hardware.Sensor
@@ -36,8 +36,6 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
 import androidx.core.util.Consumer
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -91,6 +89,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import com.fieldrecord.domain.model.FieldPhoto
 import com.fieldrecord.presentation.photo.PhotoFullscreenViewer
+import com.fieldrecord.presentation.video.VideoPlayerDialog
 import com.fieldrecord.location.LocationStore
 import com.fieldrecord.domain.repository.FieldPhotoRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -194,6 +193,7 @@ fun CameraScreen(
     var isRecording by remember { mutableStateOf(false) }
     var recordingStartedAt by remember { mutableStateOf<Long?>(null) }
     var recordingDurationSeconds by remember { mutableIntStateOf(0) }
+    var lastRecordedDurationSeconds by remember { mutableIntStateOf(0) }
     var previewUseCase by remember { mutableStateOf<Preview?>(null) }
     var camera by remember { mutableStateOf<Camera?>(null) }
     var cameraProviderRef by remember { mutableStateOf<ProcessCameraProvider?>(null) }
@@ -239,6 +239,7 @@ fun CameraScreen(
     }
     var lastPhoto by remember { mutableStateOf<FieldPhoto?>(null) }
     var latestVideoFile by remember { mutableStateOf<File?>(null) }
+    var videoPlayerFile by remember { mutableStateOf<File?>(null) }
     var showLastPhoto by remember { mutableStateOf(false) }
     var cameraPhotos by remember { mutableStateOf<List<FieldPhoto>>(emptyList()) }
     var fullscreenPhotoIndex by remember { mutableIntStateOf(0) }
@@ -475,15 +476,21 @@ fun CameraScreen(
                             when (event) {
                                 is VideoRecordEvent.Start -> {
                                     recordingStartedAt = SystemClock.elapsedRealtime()
+                                    recordingDurationSeconds = 0
+                                    lastRecordedDurationSeconds = 0
                                     isRecording = true
                                 }
                                 is VideoRecordEvent.Finalize -> {
+                                    val finalizedDurationSeconds = (
+                                        (event.recordingStats.recordedDurationNanos + 500_000_000L) / 1_000_000_000L
+                                    ).toInt().coerceAtLeast(recordingDurationSeconds)
                                     activeRecording = null
                                     isStartingVideo = false
                                     isRecording = false
                                     recordingStartedAt = null
                                     recordingDurationSeconds = 0
                                     if (event.error == VideoRecordEvent.Finalize.ERROR_NONE && outputFile.exists() && outputFile.length() > 0L) {
+                                        lastRecordedDurationSeconds = finalizedDurationSeconds
                                         latestVideoFile = outputFile
                                         android.widget.Toast.makeText(context, "Video tersimpan: ${outputFile.name}", android.widget.Toast.LENGTH_LONG).show()
                                     } else {
@@ -521,17 +528,7 @@ fun CameraScreen(
         if (file == null || !file.exists()) {
             android.widget.Toast.makeText(context, "Belum ada video tersimpan", android.widget.Toast.LENGTH_SHORT).show()
         } else {
-            try {
-                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-                val intent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(uri, "video/mp4")
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                context.startActivity(Intent.createChooser(intent, "Putar video"))
-            } catch (error: Exception) {
-                android.util.Log.e("FieldRecordCamera", "Unable to open recorded video", error)
-                android.widget.Toast.makeText(context, "Tidak ada pemutar video yang tersedia", android.widget.Toast.LENGTH_LONG).show()
-            }
+            videoPlayerFile = file
         }
     }
 
@@ -667,15 +664,26 @@ fun CameraScreen(
                 }
             }
             CameraTelemetryOverlay(gpsLocation, compassDegrees, Modifier.fillMaxSize())
-            if (isVideoMode && isRecording) {
+            if (isVideoMode && (isRecording || lastRecordedDurationSeconds > 0)) {
+                val durationLabel = if (isRecording) {
+                    formatRecordingDuration(recordingDurationSeconds)
+                } else {
+                    formatRecordedDuration(lastRecordedDurationSeconds)
+                }
                 Row(
                     modifier = Modifier.align(Alignment.TopCenter).padding(top = 12.dp)
-                        .background(Color.Black.copy(alpha = 0.72f), RoundedCornerShape(18.dp)).padding(horizontal = 14.dp, vertical = 8.dp),
+                        .background(Color.Black.copy(alpha = 0.78f), RoundedCornerShape(18.dp))
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Box(Modifier.size(9.dp).background(Color.Red, CircleShape))
-                    Text(formatRecordingDuration(recordingDurationSeconds), color = Color.White, style = MaterialTheme.typography.caption)
+                    Box(
+                        Modifier.size(9.dp).background(
+                            if (isRecording) Color.Red else Color(0xFF4CAF50),
+                            CircleShape
+                        )
+                    )
+                    Text(durationLabel, color = Color.White, style = MaterialTheme.typography.caption)
                 }
             }
             // Horizon level overlay
@@ -1003,6 +1011,10 @@ fun CameraScreen(
                 }
             }
         }
+    }
+
+    videoPlayerFile?.let { file ->
+        VideoPlayerDialog(file = file, onDismiss = { videoPlayerFile = null })
     }
 }
 

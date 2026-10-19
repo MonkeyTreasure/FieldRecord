@@ -5,6 +5,12 @@ import org.junit.Test
 
 class VideoWatermarkTextTest {
     @Test
+    fun previewShowsElapsedAndCompletedRecordingDurations() {
+        assertEquals("REC 01:01:01", formatRecordingDuration(3661))
+        assertEquals("RECORDED 01:01:01", formatRecordedDuration(3661))
+    }
+
+    @Test
     fun watermarkLinesMatchPhotoMetadataAndIncludeElapsedDuration() {
         val lines = formatVideoWatermarkLines(
             unitId = "SBYE",

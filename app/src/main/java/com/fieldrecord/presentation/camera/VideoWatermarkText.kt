@@ -18,6 +18,11 @@ internal fun formatRecordingDuration(elapsedSeconds: Int): String {
     }
 }
 
+internal fun formatRecordedDuration(elapsedSeconds: Int): String {
+    val duration = formatRecordingDuration(elapsedSeconds).removePrefix("REC ")
+    return "RECORDED $duration"
+}
+
 internal fun formatVideoWatermarkLines(
     unitId: String,
     dateText: String,

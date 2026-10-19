@@ -48,6 +48,7 @@ import com.fieldrecord.domain.model.FieldPhoto
 import com.fieldrecord.domain.model.extractPhotoTags
 import com.fieldrecord.presentation.camera.PhotoFileManager
 import com.fieldrecord.presentation.photo.PhotoFullscreenViewer
+import com.fieldrecord.presentation.video.VideoPlayerDialog
 import java.io.File
 import java.util.Calendar
 
@@ -65,6 +66,7 @@ fun GalleryScreen(
     var selectedIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
     var fullscreenPhotos by remember { mutableStateOf<List<FieldPhoto>?>(null) }
     var fullscreenIndex by remember { mutableIntStateOf(0) }
+    var selectedVideo by remember { mutableStateOf<File?>(null) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     var pendingCsvContent by remember { mutableStateOf<String?>(null) }
@@ -282,7 +284,7 @@ fun GalleryScreen(
                                     if (selectionMode) {
                                         Toast.makeText(context, "Pilih foto untuk aksi bagikan atau hapus", Toast.LENGTH_SHORT).show()
                                     } else {
-                                        openGalleryVideo(context, File(media.video.filePath))
+                                        selectedVideo = File(media.video.filePath)
                                     }
                                 },
                                 onLongClick = {
@@ -317,6 +319,10 @@ fun GalleryScreen(
             )
         }
 
+        selectedVideo?.let { video ->
+            VideoPlayerDialog(file = video, onDismiss = { selectedVideo = null })
+        }
+
         fullscreenPhotos?.let { photos ->
             PhotoFullscreenViewer(
                 photos = photos,
@@ -329,23 +335,6 @@ fun GalleryScreen(
                 onDismiss = { fullscreenPhotos = null }
             )
         }
-    }
-}
-
-private fun openGalleryVideo(context: android.content.Context, file: File) {
-    if (!file.isFile || file.length() == 0L) {
-        Toast.makeText(context, "File video tidak tersedia", Toast.LENGTH_SHORT).show()
-        return
-    }
-    try {
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "video/mp4")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        context.startActivity(Intent.createChooser(intent, "Putar video"))
-    } catch (error: Exception) {
-        Toast.makeText(context, "Tidak ada pemutar video tersedia: ${error.message ?: "periksa aplikasi pemutar"}", Toast.LENGTH_LONG).show()
     }
 }
 
