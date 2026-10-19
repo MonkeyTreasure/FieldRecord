@@ -1,13 +1,17 @@
 package com.fieldrecord.presentation.video
 
+import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
 import android.net.Uri
 import android.widget.MediaController
 import android.widget.VideoView
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.Icon
 import androidx.compose.material.IconButton
 import androidx.compose.material.Text
@@ -17,12 +21,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -30,6 +36,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 internal fun VideoPlayerDialog(file: File, onDismiss: () -> Unit) {
@@ -45,11 +53,34 @@ internal fun VideoPlayerDialog(file: File, onDismiss: () -> Unit) {
         }.getOrNull()
     }
 
+    val videoAspectRatio by produceState(initialValue = 16f / 9f, key1 = file.absolutePath) {
+        value = withContext(Dispatchers.IO) { readVideoAspectRatio(file) }
+    }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        Box(Modifier.fillMaxSize().background(Color.Black)) {
+        val density = LocalDensity.current
+        val backgroundInteraction = remember { MutableInteractionSource() }
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .clickable(
+                    interactionSource = backgroundInteraction,
+                    indication = null,
+                    onClick = onDismiss
+                )
+        ) {
+            val aspect = videoAspectRatio.takeIf { it.isFinite() && it > 0f } ?: (16f / 9f)
+            val maxWidthPx = constraints.maxWidth.toFloat()
+            val maxHeightPx = constraints.maxHeight.toFloat()
+            val playerWidthPx = minOf(maxWidthPx, maxHeightPx * aspect).coerceAtLeast(1f)
+            val playerHeightPx = (playerWidthPx / aspect).coerceAtLeast(1f)
+            val playerWidth = with(density) { playerWidthPx.toDp() }
+            val playerHeight = with(density) { playerHeightPx.toDp() }
+
             if (videoUri != null) {
                 val playerView = remember(file.absolutePath) {
                     VideoView(context).apply {
@@ -69,7 +100,9 @@ internal fun VideoPlayerDialog(file: File, onDismiss: () -> Unit) {
                 }
                 AndroidView(
                     factory = { playerView },
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier
+                        .size(width = playerWidth, height = playerHeight)
+                        .align(Alignment.Center)
                 )
                 DisposableEffect(playerView) {
                     onDispose { playerView.stopPlayback() }
@@ -100,5 +133,23 @@ internal fun VideoPlayerDialog(file: File, onDismiss: () -> Unit) {
                 )
             }
         }
+    }
+}
+
+private fun readVideoAspectRatio(file: File): Float {
+    if (!file.isFile || file.length() == 0L) return 16f / 9f
+    val retriever = MediaMetadataRetriever()
+    return try {
+        retriever.setDataSource(file.absolutePath)
+        val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+        val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+        val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+        val displayWidth = if (rotation % 180 != 0) height else width
+        val displayHeight = if (rotation % 180 != 0) width else height
+        if (displayWidth > 0 && displayHeight > 0) displayWidth.toFloat() / displayHeight else 16f / 9f
+    } catch (_: Exception) {
+        16f / 9f
+    } finally {
+        runCatching { retriever.release() }
     }
 }

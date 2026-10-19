@@ -239,6 +239,7 @@ fun CameraScreen(
     }
     var lastPhoto by remember { mutableStateOf<FieldPhoto?>(null) }
     var latestVideoFile by remember { mutableStateOf<File?>(null) }
+    var isLatestMediaVideo by remember { mutableStateOf(false) }
     var videoPlayerFile by remember { mutableStateOf<File?>(null) }
     var showLastPhoto by remember { mutableStateOf(false) }
     var cameraPhotos by remember { mutableStateOf<List<FieldPhoto>>(emptyList()) }
@@ -319,7 +320,13 @@ fun CameraScreen(
         val existing = withContext(Dispatchers.IO) { PhotoFileManager.findPhotos(context) }
         cameraPhotos = existing
         if (lastPhoto == null) lastPhoto = existing.firstOrNull()
-        latestVideoFile = withContext(Dispatchers.IO) { PhotoFileManager.findLatestVideo() }
+        val newestVideo = withContext(Dispatchers.IO) { PhotoFileManager.findLatestVideo() }
+        latestVideoFile = newestVideo
+        val newestPhoto = existing.firstOrNull()
+        isLatestMediaVideo = isVideoTheLatestMedia(
+            videoModifiedAt = newestVideo?.lastModified(),
+            photoModifiedAt = newestPhoto?.let { File(it.filePath).lastModified() }
+        )
     }
 
     DisposableEffect(context) {
@@ -492,6 +499,7 @@ fun CameraScreen(
                                     if (event.error == VideoRecordEvent.Finalize.ERROR_NONE && outputFile.exists() && outputFile.length() > 0L) {
                                         lastRecordedDurationSeconds = finalizedDurationSeconds
                                         latestVideoFile = outputFile
+                                        isLatestMediaVideo = true
                                         android.widget.Toast.makeText(context, "Video tersimpan: ${outputFile.name}", android.widget.Toast.LENGTH_LONG).show()
                                     } else {
                                         outputFile.delete()
@@ -586,6 +594,7 @@ fun CameraScreen(
                             bearingToSave, targetRotation, onSuccess = { photo ->
                                 isCapturing = false
                                 lastPhoto = photo
+                                isLatestMediaVideo = false
                                 cameraPhotos = listOf(photo) + cameraPhotos.filterNot { it.filePath == photo.filePath }
                                 onPhotoCaptured(photo)
                             },
@@ -834,7 +843,7 @@ fun CameraScreen(
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (latestVideoFile != null) {
+                    if (isLatestMediaVideo && latestVideoFile != null) {
                         Box(
                             Modifier.size(56.dp).clip(CircleShape).background(Color.DarkGray)
                                 .clickable(enabled = !isRecording && !isStartingVideo && !isCapturing && countdown == 0, onClick = openLatestVideo),
