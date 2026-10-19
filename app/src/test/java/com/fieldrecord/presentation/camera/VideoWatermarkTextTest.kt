@@ -13,6 +13,14 @@ class VideoWatermarkTextTest {
     }
 
     @Test
+    fun recordMockupIsVisibleFromVideoModeAndUsesSameTimerWhileRecording() {
+        assertEquals("REC 00:00", videoModeRecordMockupLabel(true, false, false, 0))
+        assertEquals("REC 00:07", videoModeRecordMockupLabel(true, false, true, 7))
+        assertEquals("REC 00:00", videoModeRecordMockupLabel(true, false, false, 7))
+        assertEquals(null, videoModeRecordMockupLabel(false, false, false, 0))
+    }
+
+    @Test
     fun previewShowsOnlyActiveRecordingDuration() {
         assertEquals("REC 01:01:01", formatRecordingDuration(3661))
     }

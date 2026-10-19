@@ -27,6 +27,14 @@ internal fun recordingTimerLabel(
     else -> null
 }
 
+internal fun videoModeRecordMockupLabel(
+    isVideoMode: Boolean,
+    isStartingVideo: Boolean,
+    isRecording: Boolean,
+    elapsedSeconds: Int
+): String? = if (!isVideoMode) null else
+    recordingTimerLabel(isStartingVideo, isRecording, elapsedSeconds) ?: formatRecordingDuration(0)
+
 internal fun shouldRenderVideoWatermark(isStartingVideo: Boolean, isRecording: Boolean): Boolean =
     isStartingVideo || isRecording
 

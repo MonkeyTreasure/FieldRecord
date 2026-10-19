@@ -79,12 +79,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -183,7 +180,6 @@ fun CameraScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val configuration = LocalConfiguration.current
-    val density = LocalDensity.current
     val viewfinderLandscape = configuration.screenWidthDp > configuration.screenHeightDp
     val previewView = remember {
         PreviewView(context).apply { implementationMode = PreviewView.ImplementationMode.COMPATIBLE }
@@ -199,7 +195,6 @@ fun CameraScreen(
     var recordingStartedAt by remember { mutableStateOf<Long?>(null) }
     var recordingDurationSeconds by remember { mutableIntStateOf(0) }
     var previewUseCase by remember { mutableStateOf<Preview?>(null) }
-    var viewfinderTopInRootPx by remember { mutableFloatStateOf(0f) }
     var camera by remember { mutableStateOf<Camera?>(null) }
     var cameraProviderRef by remember { mutableStateOf<ProcessCameraProvider?>(null) }
     var zoomState by remember { mutableStateOf<ZoomState?>(null) }
@@ -628,9 +623,6 @@ fun CameraScreen(
                 .clip(RoundedCornerShape(20.dp))
                 .align(Alignment.Center)
                 .offset(y = (-69).dp)
-                .onGloballyPositioned { coordinates ->
-                    viewfinderTopInRootPx = coordinates.positionInRoot().y
-                }
                 .pointerInput(camera) {
                     detectTapGestures { tap ->
                         camera?.let { activeCamera ->
@@ -685,7 +677,13 @@ fun CameraScreen(
                     drawLine(focusColor, Offset(point.x, point.y - 7.dp.toPx()), Offset(point.x, point.y + 7.dp.toPx()), strokeWidth = 2.dp.toPx())
                 }
             }
-            CameraTelemetryOverlay(gpsLocation, compassDegrees, Modifier.fillMaxSize())
+            val recordLabel = videoModeRecordMockupLabel(
+                isVideoMode = isVideoMode,
+                isStartingVideo = isStartingVideo,
+                isRecording = isRecording,
+                elapsedSeconds = recordingDurationSeconds
+            )
+            CameraTelemetryOverlay(gpsLocation, compassDegrees, recordLabel, Modifier.fillMaxSize())
             // Horizon level overlay
             if (kotlin.math.abs(horizonRoll) < 5f && kotlin.math.abs(horizonPitch) < 5f) {
                 Canvas(Modifier.fillMaxSize().padding(16.dp)) {
@@ -896,33 +894,6 @@ fun CameraScreen(
                 }
             }
         }
-        val timerTopPadding = with(density) {
-            maxOf(viewfinderTopInRootPx + 12.dp.toPx(), 64.dp.toPx()).toDp()
-        }
-        val durationLabel = recordingTimerLabel(
-            isStartingVideo = isStartingVideo,
-            isRecording = isRecording,
-            elapsedSeconds = recordingDurationSeconds
-        )
-        if (isVideoMode && durationLabel != null) {
-            Row(
-                modifier = Modifier.align(Alignment.TopCenter)
-                    .padding(top = timerTopPadding)
-                    .zIndex(2f)
-                    .background(Color.Black.copy(alpha = 0.88f), RoundedCornerShape(20.dp))
-                    .padding(horizontal = 16.dp, vertical = 9.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(9.dp)
-            ) {
-                Box(Modifier.size(11.dp).background(Color.Red, CircleShape))
-                Text(
-                    durationLabel,
-                    color = Color.White,
-                    style = MaterialTheme.typography.subtitle1
-                )
-            }
-        }
-
         if (showLastPhoto) {
             PhotoFullscreenViewer(
                 photos = cameraViewerPhotos,
@@ -1047,6 +1018,7 @@ fun CameraScreen(
 private fun CameraTelemetryOverlay(
     location: android.location.Location?,
     compassDegrees: Float,
+    recordLabel: String?,
     modifier: Modifier = Modifier
 ) {
     val freshLocation = location?.takeIf { System.currentTimeMillis() - it.time <= 120_000L }
@@ -1077,6 +1049,19 @@ private fun CameraTelemetryOverlay(
                 color = MaterialTheme.colors.onSurface,
                 style = MaterialTheme.typography.caption
             )
+            if (recordLabel != null) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Box(Modifier.size(7.dp).background(Color.Red, CircleShape))
+                    Text(
+                        text = recordLabel,
+                        color = MaterialTheme.colors.onSurface,
+                        style = MaterialTheme.typography.caption
+                    )
+                }
+            }
         }
     }
 }
