@@ -4,19 +4,25 @@ import com.fieldrecord.LocalAppIconColor
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color as AndroidColor
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Handler
+import android.os.Looper
 import android.view.OrientationEventListener
 import android.view.Surface
 import androidx.camera.core.Camera
+import androidx.camera.core.CameraEffect
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
 import androidx.camera.core.ZoomState
+import androidx.camera.core.UseCaseGroup
+import androidx.camera.effects.OverlayEffect
 import androidx.camera.video.FallbackStrategy
 import androidx.camera.video.FileOutputOptions
 import androidx.camera.video.Quality
@@ -31,6 +37,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.core.util.Consumer
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -94,6 +101,10 @@ import kotlinx.coroutines.delay
 import javax.inject.Inject
 import coil.compose.rememberAsyncImagePainter
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.concurrent.atomic.AtomicReference
 
 @HiltViewModel
 class CameraViewModel @Inject constructor(
@@ -174,6 +185,9 @@ fun CameraScreen(
     }
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
     var videoCapture by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
+    var videoWatermarkEffect by remember { mutableStateOf<OverlayEffect?>(null) }
+    val videoWatermarkSnapshot = remember { AtomicReference<VideoWatermarkFrame?>(null) }
+    val videoWatermarkRenderer = remember { VideoWatermarkRenderer() }
     var activeRecording by remember { mutableStateOf<Recording?>(null) }
     var isStartingVideo by remember { mutableStateOf(false) }
     var isRecording by remember { mutableStateOf(false) }
@@ -232,6 +246,38 @@ fun CameraScreen(
     var compassDegrees by remember { mutableFloatStateOf(Float.NaN) }
     var horizonRoll by remember { mutableFloatStateOf(0f) }
     var horizonPitch by remember { mutableFloatStateOf(0f) }
+
+    SideEffect {
+        val currentLocation = gpsLocation?.takeIf { System.currentTimeMillis() - it.time <= 120_000L }
+        val bearing = when {
+            compassDegrees.isFinite() -> compassDegrees
+            currentLocation?.hasBearing() == true -> currentLocation.bearing
+            else -> -1f
+        }
+        val dateText = runCatching {
+            SimpleDateFormat(watermarkDatePattern, Locale.US).format(Date())
+        }.getOrElse {
+            SimpleDateFormat("dd.MM.yyyy, HH:mm", Locale.US).format(Date())
+        }
+        val lines = formatVideoWatermarkLines(
+            unitId = unitId,
+            dateText = dateText,
+            latitude = currentLocation?.latitude,
+            longitude = currentLocation?.longitude,
+            bearingDegrees = bearing,
+            elapsedSeconds = recordingDurationSeconds
+        )
+        val frame = if (isRecording) {
+            VideoWatermarkFrame(
+                lines = lines,
+                textColor = runCatching { AndroidColor.parseColor(watermarkTextColor) }.getOrDefault(AndroidColor.BLUE),
+                backgroundColor = runCatching { AndroidColor.parseColor(watermarkBackgroundColor) }.getOrDefault(AndroidColor.WHITE),
+                transparentBackground = watermarkBackgroundTransparent,
+                backgroundAlpha = (watermarkBackgroundAlpha.coerceIn(0f, 1f) * 255f).toInt()
+            )
+        } else null
+        videoWatermarkSnapshot.set(frame)
+    }
 
     LaunchedEffect(context) {
         while (true) {
@@ -314,11 +360,15 @@ fun CameraScreen(
         cameraProviderRef = provider
         val oldCapture = imageCapture
         val oldVideoCapture = videoCapture
+        val oldVideoEffect = videoWatermarkEffect
         val previousLens = camera?.cameraInfo?.lensFacing ?: lensFacing
+        var newVideoEffect: OverlayEffect? = null
         try {
             if (isCameraBound) {
                 provider.unbind(*listOfNotNull(preview, oldCapture, oldVideoCapture).toTypedArray())
             }
+            oldVideoEffect?.close()
+            videoWatermarkEffect = null
             val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
             val boundCamera = if (isVideoMode) {
                 val recorder = Recorder.Builder()
@@ -330,8 +380,36 @@ fun CameraScreen(
                     )
                     .build()
                 val capture = VideoCapture.withOutput(recorder).apply { targetRotation = targetRotation }
-                val bound = provider.bindToLifecycle(lifecycleOwner, selector, preview, capture)
+                val effect = OverlayEffect(
+                    CameraEffect.VIDEO_CAPTURE,
+                    0,
+                    Handler(Looper.getMainLooper()),
+                    Consumer { error ->
+                        android.util.Log.e("FieldRecordCamera", "Video watermark effect failed", error)
+                        videoWatermarkSnapshot.set(null)
+                        activeRecording?.stop()
+                        android.widget.Toast.makeText(context, "Watermark video gagal; perekaman dihentikan", android.widget.Toast.LENGTH_LONG).show()
+                    }
+                )
+                newVideoEffect = effect
+                effect.setOnDrawListener { frame ->
+                    val watermark = videoWatermarkSnapshot.get()
+                    if (watermark == null) {
+                        false
+                    } else {
+                        val frameSize = frame.size
+                        videoWatermarkRenderer.draw(frame.overlayCanvas, frameSize.width, frameSize.height, watermark)
+                        true
+                    }
+                }
+                val useCaseGroup = UseCaseGroup.Builder()
+                    .addUseCase(preview)
+                    .addUseCase(capture)
+                    .addEffect(effect)
+                    .build()
+                val bound = provider.bindToLifecycle(lifecycleOwner, selector, useCaseGroup)
                 videoCapture = capture
+                videoWatermarkEffect = effect
                 imageCapture = null
                 bound
             } else {
@@ -351,6 +429,8 @@ fun CameraScreen(
             zoomRatio = zoomState?.zoomRatio ?: 1f
             exposureIndex = boundCamera.cameraInfo.exposureState.exposureCompensationIndex
         } catch (e: Exception) {
+            newVideoEffect?.close()
+            videoWatermarkEffect = null
             camera = null
             imageCapture = null
             videoCapture = null
@@ -463,10 +543,12 @@ fun CameraScreen(
     }
 
     val currentRecording by rememberUpdatedState(activeRecording)
+    val currentVideoEffect by rememberUpdatedState(videoWatermarkEffect)
     DisposableEffect(lifecycleOwner) {
         onDispose {
             currentRecording?.stop()
             cameraProviderRef?.unbindAll()
+            currentVideoEffect?.close()
             isCameraBound = false
         }
     }
