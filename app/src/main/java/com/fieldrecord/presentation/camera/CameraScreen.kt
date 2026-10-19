@@ -76,9 +76,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalConfiguration
@@ -684,7 +686,11 @@ fun CameraScreen(
                 }
             }
             if (!telemetryUsesScreenBottomAnchor(viewfinderLandscape)) {
-                CameraTelemetryOverlay(gpsLocation, compassDegrees, recordLabel, Modifier.fillMaxSize())
+                CameraTelemetryOverlay(
+                    gpsLocation, compassDegrees, recordLabel,
+                    surfaceRotation = targetRotation,
+                    modifier = Modifier.fillMaxSize()
+                )
             }
             // Horizon level overlay
             if (kotlin.math.abs(horizonRoll) < 5f && kotlin.math.abs(horizonPitch) < 5f) {
@@ -733,7 +739,11 @@ fun CameraScreen(
         }
 
         if (telemetryUsesScreenBottomAnchor(viewfinderLandscape)) {
-            CameraTelemetryOverlay(gpsLocation, compassDegrees, recordLabel, Modifier.fillMaxSize())
+            CameraTelemetryOverlay(
+                    gpsLocation, compassDegrees, recordLabel,
+                    surfaceRotation = targetRotation,
+                    modifier = Modifier.fillMaxSize()
+                )
         }
 
         Column(
@@ -1025,6 +1035,7 @@ private fun CameraTelemetryOverlay(
     location: android.location.Location?,
     compassDegrees: Float,
     recordLabel: String?,
+    surfaceRotation: Int,
     modifier: Modifier = Modifier
 ) {
     val freshLocation = location?.takeIf { System.currentTimeMillis() - it.time <= 120_000L }
@@ -1035,38 +1046,58 @@ private fun CameraTelemetryOverlay(
         listOf("N", "NE", "E", "SE", "S", "SW", "W", "NW")[((compassDegrees + 22.5f) / 45f).toInt() % 8]
     } else "—"
     val compassLabel = "KOMPAS  $cardinal  ${if (compassDegrees.isFinite()) "${compassDegrees.toInt()}°" else "—°"}"
-    Box(modifier = modifier) {
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(start = 12.dp, bottom = 12.dp)
-                .clip(RoundedCornerShape(8.dp))
-                                .background(MaterialTheme.colors.surface.copy(alpha = 0.85f))
-                .padding(horizontal = 10.dp, vertical = 7.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Text(
-                text = locationLabel,
-                color = MaterialTheme.colors.onSurface,
-                style = MaterialTheme.typography.caption
-            )
-            Text(
-                text = compassLabel,
-                color = MaterialTheme.colors.onSurface,
-                style = MaterialTheme.typography.caption
-            )
-            if (recordLabel != null) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Box(Modifier.size(7.dp).background(Color.Red, CircleShape))
-                    Text(
-                        text = recordLabel,
-                        color = MaterialTheme.colors.onSurface,
-                        style = MaterialTheme.typography.caption
-                    )
+    val orientation = cameraTelemetryOrientation(surfaceRotation)
+    Layout(
+        modifier = modifier,
+        content = {
+            Column(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colors.surface.copy(alpha = 0.85f))
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = locationLabel,
+                    color = MaterialTheme.colors.onSurface,
+                    style = MaterialTheme.typography.caption
+                )
+                Text(
+                    text = compassLabel,
+                    color = MaterialTheme.colors.onSurface,
+                    style = MaterialTheme.typography.caption
+                )
+                if (recordLabel != null) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(Modifier.size(7.dp).background(Color.Red, CircleShape))
+                        Text(
+                            text = recordLabel,
+                            color = MaterialTheme.colors.onSurface,
+                            style = MaterialTheme.typography.caption
+                        )
+                    }
                 }
+            }
+        }
+    ) { measurables, constraints ->
+        val placeable = measurables.single().measure(
+            constraints.copy(minWidth = 0, minHeight = 0)
+        )
+        val width = constraints.maxWidth
+        val height = constraints.maxHeight
+        val padding = 12.dp.roundToPx()
+        val pivotX = (placeable.width * orientation.pivotX).toInt()
+        val pivotY = (placeable.height * orientation.pivotY).toInt()
+        val left = padding - pivotX
+        val top = height - padding - pivotY
+
+        layout(width, height) {
+            placeable.placeWithLayer(left, top) {
+                rotationZ = orientation.rotationDegrees.toFloat()
+                transformOrigin = TransformOrigin(orientation.pivotX, orientation.pivotY)
             }
         }
     }
