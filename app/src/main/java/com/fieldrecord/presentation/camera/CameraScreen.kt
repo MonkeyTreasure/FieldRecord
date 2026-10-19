@@ -1,5 +1,6 @@
 package com.fieldrecord.presentation.camera
 
+import com.fieldrecord.LocalAppIconColor
 import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -43,6 +44,8 @@ import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Grid3x3
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Exposure
@@ -59,6 +62,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -92,7 +96,9 @@ class CameraViewModel @Inject constructor(
         onSuccess: (FieldPhoto) -> Unit,
         onError: (String) -> Unit
     ) {
-        val outputFile = PhotoFileManager.getOutputFile()
+        val userName = context.getSharedPreferences("field_record_prefs", Context.MODE_PRIVATE)
+            .getString("photographer_name", "")
+        val outputFile = PhotoFileManager.getOutputFile(userName)
         
         val view = (context as? android.app.Activity)?.window?.decorView
         view?.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
@@ -169,11 +175,13 @@ fun CameraScreen(
     var focusPoint by remember { mutableStateOf<Offset?>(null) }
     var countdown by remember { mutableIntStateOf(0) }
     var isCapturing by remember { mutableStateOf(false) }
+    var isVideoMode by remember { mutableStateOf(false) }
     var isCameraBound by remember { mutableStateOf(false) }
     var targetRotation by remember {
         mutableIntStateOf(previewView.display?.rotation ?: Surface.ROTATION_0)
     }
     var unitId by remember { mutableStateOf("SBYE") }
+    var photographerName by remember { mutableStateOf("") }
     var watermarkTextColor by remember { mutableStateOf("#0000FF") }
     var watermarkDatePattern by remember { mutableStateOf("dd.MM.yyyy, HH:mm") }
     var watermarkBackgroundColor by remember { mutableStateOf("#FFFFFF") }
@@ -184,11 +192,10 @@ fun CameraScreen(
     val captureScope = rememberCoroutineScope()
     val availableZoomPresets = zoomState?.let { supportedZoomPresets(it.minZoomRatio, it.maxZoomRatio) }.orEmpty()
 
-    val isLandscape = targetRotation == Surface.ROTATION_90 || targetRotation == Surface.ROTATION_270
-
     LaunchedEffect(context) {
         val prefs = context.getSharedPreferences("field_record_prefs", Context.MODE_PRIVATE)
         unitId = prefs.getString("watermark_line1", prefs.getString("unit_id", "SBYE")) ?: "SBYE"
+        photographerName = prefs.getString("photographer_name", "") ?: ""
         watermarkTextColor = prefs.getString("watermark_text_color", "#0000FF") ?: "#0000FF"
         watermarkDatePattern = prefs.getString("watermark_date_pattern", "dd.MM.yyyy, HH:mm") ?: "dd.MM.yyyy, HH:mm"
         watermarkBackgroundColor = prefs.getString("watermark_background_color", "#FFFFFF") ?: "#FFFFFF"
@@ -370,14 +377,14 @@ fun CameraScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // Viewfinder centered; camera controls remain in the top and bottom bands.
+        // Viewfinder centered
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(if (viewfinderLandscape) 4f / 3f else 3f / 4f)
                 .clip(RoundedCornerShape(20.dp))
                 .align(Alignment.Center)
-                .offset(y = (-30).dp)
+                .offset(y = (-55).dp)
                 .pointerInput(camera) {
                     detectTapGestures { tap ->
                         camera?.let { activeCamera ->
@@ -424,14 +431,15 @@ fun CameraScreen(
                     }
                 }
             }
+            val focusColor = MaterialTheme.colors.primary
             focusPoint?.let { point ->
                 Canvas(Modifier.fillMaxSize()) {
-                    drawCircle(Color(0xFFFFB300), radius = 27.dp.toPx(), center = point, style = Stroke(width = 2.dp.toPx()))
-                    drawLine(Color(0xFFFFB300), Offset(point.x - 7.dp.toPx(), point.y), Offset(point.x + 7.dp.toPx(), point.y), strokeWidth = 2.dp.toPx())
-                    drawLine(Color(0xFFFFB300), Offset(point.x, point.y - 7.dp.toPx()), Offset(point.x, point.y + 7.dp.toPx()), strokeWidth = 2.dp.toPx())
+                    drawCircle(focusColor, radius = 27.dp.toPx(), center = point, style = Stroke(width = 2.dp.toPx()))
+                    drawLine(focusColor, Offset(point.x - 7.dp.toPx(), point.y), Offset(point.x + 7.dp.toPx(), point.y), strokeWidth = 2.dp.toPx())
+                    drawLine(focusColor, Offset(point.x, point.y - 7.dp.toPx()), Offset(point.x, point.y + 7.dp.toPx()), strokeWidth = 2.dp.toPx())
                 }
             }
-            CameraTelemetryOverlay(gpsLocation, compassDegrees, isLandscape, Modifier.fillMaxSize())
+            CameraTelemetryOverlay(gpsLocation, compassDegrees, Modifier.fillMaxSize())
             // Horizon level overlay
             if (kotlin.math.abs(horizonRoll) < 5f && kotlin.math.abs(horizonPitch) < 5f) {
                 Canvas(Modifier.fillMaxSize().padding(16.dp)) {
@@ -444,10 +452,10 @@ fun CameraScreen(
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .padding(end = 12.dp, bottom = 52.dp)
+                        .padding(end = 12.dp, bottom = 12.dp)
                         .size(42.dp)
-                        .background(Color.Black.copy(alpha = 0.6f), CircleShape)
-                        .border(1.5.dp, Color(0xFFFFB300), CircleShape)
+                        .background(MaterialTheme.colors.primary.copy(alpha = 0.9f), CircleShape)
+                        .border(1.5.dp, Color.White, CircleShape)
                         .clickable {
                         val view = (context as? android.app.Activity)?.window?.decorView
                         view?.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
@@ -463,7 +471,7 @@ fun CameraScreen(
                 ) {
                     Text(
                         text = "${String.format(java.util.Locale.US, "%.1f", zoomRatio)}×",
-                        color = Color(0xFFFFB300),
+                        color = Color.White,
                         style = MaterialTheme.typography.caption
                     )
                 }
@@ -473,7 +481,7 @@ fun CameraScreen(
                     countdown.toString(),
                     color = Color.White,
                     style = MaterialTheme.typography.h2,
-                    modifier = Modifier.align(Alignment.Center).background(Color.Black.copy(alpha = 0.35f), CircleShape).padding(24.dp)
+                    modifier = Modifier.align(Alignment.Center).background(MaterialTheme.colors.primary.copy(alpha = 0.85f), CircleShape).padding(24.dp)
                 )
             }
         }
@@ -502,7 +510,7 @@ fun CameraScreen(
                                 FlashSetting.ON -> Icons.Default.FlashOn
                             },
                             contentDescription = "Flash ${flashSetting.name}",
-                            tint = Color.White
+                            tint = LocalAppIconColor.current
                         )
                     }
                     IconButton(onClick = {
@@ -510,21 +518,21 @@ fun CameraScreen(
                         preferences.edit().putInt("timer_seconds", timerSeconds).apply()
                     }) {
                         Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.Timer, contentDescription = "Timer ${timerSeconds}s", tint = if (timerSeconds > 0) Color(0xFFFFB300) else Color.White)
-                            if (timerSeconds > 0) Text("${timerSeconds}", color = Color.White, style = MaterialTheme.typography.overline)
+                            Icon(Icons.Default.Timer, contentDescription = "Timer ${timerSeconds}s", tint = if (timerSeconds > 0) MaterialTheme.colors.primary else LocalAppIconColor.current)
+                            if (timerSeconds > 0) Text("${timerSeconds}", color = MaterialTheme.colors.onSurface, style = MaterialTheme.typography.overline)
                         }
                     }
                     IconButton(onClick = { gridEnabled = !gridEnabled; preferences.edit().putBoolean("grid", gridEnabled).apply() }) {
-                        Icon(Icons.Default.Grid3x3, contentDescription = if (gridEnabled) "Grid aktif" else "Grid nonaktif", tint = if (gridEnabled) Color(0xFFFFB300) else Color.White)
+                        Icon(Icons.Default.Grid3x3, contentDescription = if (gridEnabled) "Grid aktif" else "Grid nonaktif", tint = if (gridEnabled) MaterialTheme.colors.primary else LocalAppIconColor.current)
                     }
                     IconButton(onClick = { prioritizeQuality = !prioritizeQuality; preferences.edit().putBoolean("quality", prioritizeQuality).apply() }) {
-                        Icon(if (prioritizeQuality) Icons.Default.HighQuality else Icons.Default.Speed, contentDescription = if (prioritizeQuality) "Kualitas tinggi" else "Mode cepat", tint = if (prioritizeQuality) Color(0xFFFFB300) else Color.White)
+                        Icon(if (prioritizeQuality) Icons.Default.HighQuality else Icons.Default.Speed, contentDescription = if (prioritizeQuality) "Kualitas tinggi" else "Mode cepat", tint = if (prioritizeQuality) MaterialTheme.colors.primary else LocalAppIconColor.current)
                     }
                     IconButton(onClick = { showExposureControl = !showExposureControl }) {
-                        Icon(Icons.Default.Exposure, contentDescription = "Exposure", tint = if (showExposureControl) Color(0xFFFFB300) else Color.White)
+                        Icon(Icons.Default.Exposure, contentDescription = "Exposure", tint = if (showExposureControl) MaterialTheme.colors.primary else LocalAppIconColor.current)
                     }
                     IconButton(onClick = { showUnitSettings = true }) {
-                        Icon(Icons.Default.Settings, "Pengaturan kamera", tint = Color.White)
+                        Icon(Icons.Default.Settings, "Pengaturan kamera", tint = LocalAppIconColor.current)
                     }
                 }
                 if (showExposureControl) {
@@ -532,22 +540,22 @@ fun CameraScreen(
                         val minEv = exposure.exposureCompensationRange.lower
                         val maxEv = exposure.exposureCompensationRange.upper
                         if (minEv < maxEv) {
-                            Text("EV ${if (exposureIndex > 0) "+" else ""}$exposureIndex", color = Color.White)
+                            Text("EV ${if (exposureIndex > 0) "+" else ""}$exposureIndex", color = MaterialTheme.colors.onSurface)
                             Slider(
                                 value = exposureIndex.toFloat().coerceIn(minEv.toFloat(), maxEv.toFloat()),
                                 onValueChange = { exposureIndex = it.toInt() },
                                 onValueChangeFinished = { camera?.cameraControl?.setExposureCompensationIndex(exposureIndex) },
                                 valueRange = minEv.toFloat()..maxEv.toFloat(),
                                 modifier = Modifier.width(180.dp).height(32.dp),
-                                colors = SliderDefaults.colors(thumbColor = Color(0xFFFFB300), activeTrackColor = Color(0xFFFFB300))
+                                colors = SliderDefaults.colors(thumbColor = MaterialTheme.colors.primary, activeTrackColor = MaterialTheme.colors.primary)
                             )
                         } else Text("EV tidak didukung", color = Color.White)
                     }
                 }
             }
-            
+
             Row(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -563,15 +571,21 @@ fun CameraScreen(
                             }
                     )
                 } ?: IconButton(onClick = {}) {
-                    Icon(Icons.Default.PhotoLibrary, null, tint = Color.White)
+                    Icon(Icons.Default.PhotoLibrary, null, tint = LocalAppIconColor.current)
                 }
                 
                 Button(
-                    onClick = startCapture,
+                    onClick = {
+                        if (!isVideoMode) {
+                            startCapture()
+                        } else {
+                            android.widget.Toast.makeText(context, "Mode video segera aktif", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    },
                     enabled = !isCapturing && countdown == 0 && imageCapture != null,
-                    modifier = Modifier.size(80.dp).border(4.dp, Color.White, CircleShape),
+                    modifier = Modifier.size(80.dp).border(4.dp, MaterialTheme.colors.primary, CircleShape),
                     shape = CircleShape,
-                    colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF2E7D32))
+                    colors = ButtonDefaults.buttonColors(backgroundColor = if (isVideoMode) Color.Red else MaterialTheme.colors.primary)
                 ) { }
                 IconButton(
                     onClick = {
@@ -581,7 +595,7 @@ fun CameraScreen(
                         if (provider != null && provider.hasCamera(selector)) lensFacing = nextLens
                         else android.widget.Toast.makeText(context, "Kamera depan/belakang tidak tersedia", android.widget.Toast.LENGTH_SHORT).show()
                     }
-                ) { Icon(Icons.Default.Cameraswitch, "Ganti kamera", tint = Color.White) }
+                ) { Icon(Icons.Default.Cameraswitch, "Ganti kamera", tint = LocalAppIconColor.current) }
             }
         }
         if (showLastPhoto) {
@@ -600,6 +614,7 @@ fun CameraScreen(
 
         if (showUnitSettings) {
             var inputLine1 by remember { mutableStateOf(unitId) }
+            var inputPhotographerName by remember { mutableStateOf(photographerName) }
             var inputTextColor by remember { mutableStateOf(watermarkTextColor) }
             var inputDatePattern by remember { mutableStateOf(watermarkDatePattern) }
             var inputBackgroundColor by remember { mutableStateOf(watermarkBackgroundColor) }
@@ -607,31 +622,45 @@ fun CameraScreen(
             var inputBackgroundAlpha by remember { mutableFloatStateOf(watermarkBackgroundAlpha) }
             var dateMenuExpanded by remember { mutableStateOf(false) }
             val datePatterns = listOf("dd.MM.yyyy, HH:mm", "dd/MM/yyyy HH:mm", "yyyy-MM-dd HH:mm", "dd.MM.yyyy", "HH:mm")
-            Surface(Modifier.fillMaxSize().zIndex(10f), color = Color(0xFF121212)) {
+            Surface(Modifier.fillMaxSize().zIndex(10f), color = MaterialTheme.colors.surface) {
                 Column(Modifier.fillMaxSize().padding(16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = { showUnitSettings = false }) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "Kembali", tint = Color.White)
+                            Icon(Icons.Default.ArrowBack, contentDescription = "Kembali", tint = LocalAppIconColor.current)
                         }
-                        Text("Pengaturan Watermark", style = MaterialTheme.typography.h6, color = Color.White)
+                        Text("Pengaturan Watermark", style = MaterialTheme.typography.h6, color = MaterialTheme.colors.onSurface)
                     }
                     Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(vertical = 8.dp)) {
-                        Text("Text baris 1", style = MaterialTheme.typography.subtitle2, color = Color.White)
+                        Text("Text baris 1", style = MaterialTheme.typography.subtitle2, color = MaterialTheme.colors.onSurface)
                         OutlinedTextField(value = inputLine1, onValueChange = { inputLine1 = it }, singleLine = true, modifier = Modifier.fillMaxWidth(), placeholder = { Text("Contoh: SBYE") })
+                        Spacer(Modifier.height(16.dp))
+                        Text("Nama pengguna / pengambil foto", style = MaterialTheme.typography.subtitle2, color = MaterialTheme.colors.onSurface)
+                        OutlinedTextField(
+                            value = inputPhotographerName,
+                            onValueChange = { inputPhotographerName = it },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("Contoh: Novianto Syahmud") }
+                        )
+                        Text(
+                            "Nama ini menjadi stamp pada nama file dan data berbagi.",
+                            style = MaterialTheme.typography.caption,
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.7f)
+                        )
                         Spacer(Modifier.height(12.dp))
-                        Text("Warna font", style = MaterialTheme.typography.subtitle2, color = Color.White)
+                        Text("Warna font", style = MaterialTheme.typography.subtitle2, color = MaterialTheme.colors.onSurface)
                         OutlinedTextField(value = inputTextColor, onValueChange = { inputTextColor = it }, singleLine = true, modifier = Modifier.fillMaxWidth(), label = { Text("Hex, contoh #0000FF") })
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
                             listOf("#0000FF", "#000000", "#FFFFFF", "#2E7D32", "#FFB300", "#FF0000").forEach { hex ->
                                 Box(
                                     Modifier.size(30.dp).clip(CircleShape).background(Color(android.graphics.Color.parseColor(hex)))
-                                        .border(if (inputTextColor.equals(hex, true)) 3.dp else 1.dp, Color.Gray, CircleShape)
+                                        .border(if (inputTextColor.equals(hex, true)) 3.dp else 1.dp, Color.White, CircleShape)
                                         .clickable { inputTextColor = hex }
                                 )
                             }
                         }
                         Spacer(Modifier.height(16.dp))
-                        Text("Format tanggal / waktu — baris 2", style = MaterialTheme.typography.subtitle2, color = Color.White)
+                        Text("Format tanggal / waktu — baris 2", style = MaterialTheme.typography.subtitle2, color = MaterialTheme.colors.onSurface)
                         Box {
                             OutlinedButton(onClick = { dateMenuExpanded = true }) { Text(inputDatePattern) }
                             DropdownMenu(expanded = dateMenuExpanded, onDismissRequest = { dateMenuExpanded = false }) {
@@ -639,14 +668,14 @@ fun CameraScreen(
                             }
                         }
                         Spacer(Modifier.height(16.dp))
-                        Text("Latar watermark", style = MaterialTheme.typography.subtitle2, color = Color.White)
+                        Text("Latar watermark", style = MaterialTheme.typography.subtitle2, color = MaterialTheme.colors.onSurface)
                         OutlinedTextField(value = inputBackgroundColor, onValueChange = { inputBackgroundColor = it }, singleLine = true, modifier = Modifier.fillMaxWidth(), label = { Text("Warna hex, contoh #FFFFFF") })
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = inputBackgroundTransparent, onCheckedChange = { inputBackgroundTransparent = it })
-                            Text("Gunakan latar transparan", color = Color.White)
+                            Text("Gunakan latar transparan", color = MaterialTheme.colors.onSurface)
                         }
                         if (inputBackgroundTransparent) {
-                            Text("Opasitas ${"%.0f".format(inputBackgroundAlpha * 100)}%", style = MaterialTheme.typography.caption, color = Color.White)
+                            Text("Opasitas ${"%.0f".format(inputBackgroundAlpha * 100)}%", style = MaterialTheme.typography.caption, color = MaterialTheme.colors.onSurface)
                             Slider(value = inputBackgroundAlpha, onValueChange = { inputBackgroundAlpha = it }, valueRange = 0.1f..1f)
                         }
                     }
@@ -658,6 +687,7 @@ fun CameraScreen(
                                 val validTextColor = runCatching { android.graphics.Color.parseColor(inputTextColor); inputTextColor }.getOrDefault(watermarkTextColor)
                                 val validBackgroundColor = runCatching { android.graphics.Color.parseColor(inputBackgroundColor); inputBackgroundColor }.getOrDefault(watermarkBackgroundColor)
                                 unitId = inputLine1.ifBlank { "SBYE" }
+                                photographerName = inputPhotographerName.trim()
                                 watermarkTextColor = validTextColor
                                 watermarkDatePattern = inputDatePattern
                                 watermarkBackgroundColor = validBackgroundColor
@@ -666,6 +696,7 @@ fun CameraScreen(
                                 context.getSharedPreferences("field_record_prefs", Context.MODE_PRIVATE).edit()
                                     .putString("unit_id", unitId)
                                     .putString("watermark_line1", unitId)
+                                    .putString("photographer_name", photographerName)
                                     .putString("watermark_text_color", watermarkTextColor)
                                     .putString("watermark_date_pattern", watermarkDatePattern)
                                     .putString("watermark_background_color", watermarkBackgroundColor)
@@ -674,8 +705,8 @@ fun CameraScreen(
                                     .apply()
                                 showUnitSettings = false
                             },
-                            colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF2E7D32))
-                        ) { Text("Simpan", color = Color.White) }
+                            colors = ButtonDefaults.buttonColors(backgroundColor = MaterialTheme.colors.primary)
+                        ) { Text("Simpan", color = MaterialTheme.colors.onPrimary) }
                     }
                 }
             }
@@ -687,7 +718,6 @@ fun CameraScreen(
 private fun CameraTelemetryOverlay(
     location: android.location.Location?,
     compassDegrees: Float,
-    isLandscape: Boolean,
     modifier: Modifier = Modifier
 ) {
     val freshLocation = location?.takeIf { System.currentTimeMillis() - it.time <= 120_000L }
@@ -697,28 +727,27 @@ private fun CameraTelemetryOverlay(
     val cardinal = if (compassDegrees.isFinite()) {
         listOf("N", "NE", "E", "SE", "S", "SW", "W", "NW")[((compassDegrees + 22.5f) / 45f).toInt() % 8]
     } else "—"
-    
+    val compassLabel = "KOMPAS  $cardinal  ${if (compassDegrees.isFinite()) "${compassDegrees.toInt()}°" else "—°"}"
     Box(modifier = modifier) {
-        // Option 1: Standard Bottom (Balanced) for both Portrait and Landscape (no rotation needed)
-        Text(
-            text = locationLabel,
-            color = Color.White,
+        Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .padding(start = 12.dp, bottom = 12.dp)
-                .clip(RoundedCornerShape(8.dp)).background(Color.Black.copy(alpha = 0.58f))
+                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colors.surface.copy(alpha = 0.85f))
                 .padding(horizontal = 10.dp, vertical = 7.dp),
-            style = MaterialTheme.typography.caption
-        )
-        Text(
-            text = "KOMPAS  $cardinal  ${if (compassDegrees.isFinite()) "${compassDegrees.toInt()}°" else "—°"}",
-            color = Color.White,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 12.dp, bottom = 12.dp)
-                .clip(RoundedCornerShape(8.dp)).background(Color.Black.copy(alpha = 0.58f))
-                .padding(horizontal = 10.dp, vertical = 7.dp),
-            style = MaterialTheme.typography.caption
-        )
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = locationLabel,
+                color = MaterialTheme.colors.onSurface,
+                style = MaterialTheme.typography.caption
+            )
+            Text(
+                text = compassLabel,
+                color = MaterialTheme.colors.onSurface,
+                style = MaterialTheme.typography.caption
+            )
+        }
     }
 }

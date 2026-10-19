@@ -10,6 +10,9 @@ import android.graphics.Typeface
 import android.widget.Toast
 import android.content.Intent
 import android.net.Uri
+import android.os.Environment
+import android.media.ExifInterface
+import androidx.camera.core.ImageProxy
 import com.fieldrecord.domain.model.FieldPhoto
 import java.io.File
 import java.io.FileOutputStream
@@ -20,21 +23,86 @@ import java.util.Locale
 object PhotoFileManager {
     private const val ROOT_FOLDER = "FieldRecord"
     private const val PHOTO_FOLDER = "Photo"
+    private const val VIDEO_FOLDER = "Video"
     private const val EXTENSION = ".jpg"
-    private val filenamePattern = Regex("^IMG_(\\d{6})_(\\d{3,})\\.jpg$", RegexOption.IGNORE_CASE)
+    private const val VIDEO_EXTENSION = ".mp4"
+    private val filenamePattern = Regex("^IMG_(\\d{6})_(\\d{3,})(?:_([\\p{L}\\p{N}_-]+))?\\.jpg$", RegexOption.IGNORE_CASE)
+    private val videoFilenamePattern = Regex("^VID_(\\d{6})_(\\d{3,})\\.mp4$", RegexOption.IGNORE_CASE)
 
     /** USB-visible shared internal storage: /storage/emulated/0/FieldRecord/Photo. */
     fun getStorageDir(): File =
         File(Environment.getExternalStorageDirectory(), "$ROOT_FOLDER/$PHOTO_FOLDER")
 
+    /** USB-visible shared internal storage: /storage/emulated/0/FieldRecord/Video. */
+    fun getVideoStorageDir(): File =
+        File(Environment.getExternalStorageDirectory(), "$ROOT_FOLDER/$VIDEO_FOLDER")
+
+    /** Create a collision-safe monthly sequence in the form VID_YYMMdd_xxx.mp4. */
+    @Synchronized
+    fun getOutputVideoFile(): File {
+        val dir = getVideoStorageDir().apply { check(isDirectory || mkdirs()) }
+        val dateStamp = SimpleDateFormat("yyMMdd", Locale.US).format(Date())
+        val monthlyFilenames = (dir.listFiles() ?: emptyArray()).map { it.name }
+        val next = nextMonthlyVideoSequence(dateStamp, monthlyFilenames)
+        return File(dir, formatVideoFilename(dateStamp, next))
+    }
+
+    internal fun nextMonthlyVideoSequence(dateStamp: String, filenames: Iterable<String>): Int {
+        require(dateStamp.matches(Regex("\\d{6}")))
+        val monthPrefix = dateStamp.take(4)
+        val monthlySequences = filenames.mapNotNull { name ->
+            videoFilenamePattern.matchEntire(name)?.let { match ->
+                if (match.groupValues[1].startsWith(monthPrefix)) {
+                    match.groupValues[2].toIntOrNull()
+                } else null
+            }
+        }
+        return maxOf(monthlySequences.size, monthlySequences.maxOrNull() ?: 0) + 1
+    }
+
+    internal fun formatVideoFilename(dateStamp: String, sequence: Int): String {
+        require(dateStamp.matches(Regex("\\d{6}")))
+        require(sequence > 0)
+        return "VID_${dateStamp}_${String.format(Locale.US, "%03d", sequence)}$VIDEO_EXTENSION"
+    }
+
     /** Create a collision-safe monthly sequence in the form IMG_YYMMdd_xxx.jpg. */
     @Synchronized
-    fun getOutputFile(): File {
+    fun getOutputFile(userName: String? = null): File {
         val dir = getStorageDir().apply { check(isDirectory || mkdirs()) }
         val dateStamp = SimpleDateFormat("yyMMdd", Locale.US).format(Date())
         val monthlyFilenames = (dir.listFiles() ?: emptyArray()).map { it.name }
         val next = nextMonthlySequence(dateStamp, monthlyFilenames)
-        return File(dir, formatFilename(dateStamp, next))
+        return File(dir, formatFilename(dateStamp, next, userName))
+    }
+
+    /** Create a collision-safe monthly sequence based on a timestamp for .field import. */
+    @Synchronized
+    fun getOutputFileForTimestamp(
+        timestamp: Long,
+        existingFilenames: MutableList<String>,
+        userName: String? = null,
+        preferredFileName: String? = null
+    ): File {
+        val dir = getStorageDir().apply { check(isDirectory || mkdirs()) }
+        val dateStamp = SimpleDateFormat("yyMMdd", Locale.US).format(Date(timestamp))
+        val allFilenames = ((dir.listFiles() ?: emptyArray()).map { it.name } + existingFilenames).toMutableSet()
+        val safePreferredName = preferredFileName?.takeIf { filenamePattern.matches(it) }
+        val filename = if (safePreferredName != null) {
+            val preferred = requireNotNull(safePreferredName)
+            var candidate = preferred
+            var collisionIndex = 1
+            while (candidate in allFilenames) {
+                candidate = "${preferred.substringBeforeLast('.')}_$collisionIndex$EXTENSION"
+                collisionIndex++
+            }
+            candidate
+        } else {
+            val next = nextMonthlySequence(dateStamp, allFilenames)
+            formatFilename(dateStamp, next, userName)
+        }
+        existingFilenames.add(filename)
+        return File(dir, filename)
     }
 
     internal fun nextMonthlySequence(dateStamp: String, filenames: Iterable<String>): Int {
@@ -50,11 +118,23 @@ object PhotoFileManager {
         return maxOf(monthlySequences.size, monthlySequences.maxOrNull() ?: 0) + 1
     }
 
-    internal fun formatFilename(dateStamp: String, sequence: Int): String {
+    /** Create a collision-safe monthly photo name, optionally stamped with the configured user. */
+    internal fun formatFilename(dateStamp: String, sequence: Int, userName: String? = null): String {
         require(dateStamp.matches(Regex("\\d{6}")))
         require(sequence > 0)
-        return "IMG_${dateStamp}_${String.format(Locale.US, "%03d", sequence)}$EXTENSION"
+        val safeUserName = sanitizeUserNameForFilename(userName)
+        val userStamp = if (safeUserName.isBlank()) "" else "_$safeUserName"
+        return "IMG_${dateStamp}_${String.format(Locale.US, "%03d", sequence)}$userStamp$EXTENSION"
     }
+
+    internal fun sanitizeUserNameForFilename(userName: String?): String = userName.orEmpty()
+        .trim()
+        .replace(Regex("[^\\p{L}\\p{N}_-]+"), "_")
+        .trim('_', '-')
+        .take(40)
+
+    fun photographerStampFromFilename(fileName: String): String? =
+        filenamePattern.matchEntire(fileName)?.groupValues?.getOrNull(3)?.takeIf { it.isNotBlank() }?.replace('_', ' ')
 
     /** Scan active and known legacy folders, newest first, for camera preview initialization. */
     fun findPhotos(context: Context): List<FieldPhoto> {

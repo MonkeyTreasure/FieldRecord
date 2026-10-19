@@ -6,6 +6,78 @@ import kotlin.math.roundToInt
 
 private val hashtagRegex = Regex("(?<![\\p{L}\\p{N}_])#([\\p{L}\\p{N}_-]+)")
 
+enum class PhotoTagKind { CATEGORY, BLOCK, LOCATION }
+
+data class PhotoTagOption(val key: String, val label: String)
+
+data class PhotoTagFacets(
+    val categories: List<PhotoTagOption> = emptyList(),
+    val blocks: List<PhotoTagOption> = emptyList(),
+    val locations: List<PhotoTagOption> = emptyList()
+) {
+    val isEmpty: Boolean get() = categories.isEmpty() && blocks.isEmpty() && locations.isEmpty()
+}
+
+data class PhotoTagFilter(val kind: PhotoTagKind, val key: String, val label: String = key)
+
+/** Classifies normal hashtags as categories and #blok_CODE_LOCATION tags as block/location facets. */
+fun extractPhotoTagFacets(note: String?): PhotoTagFacets {
+    val categories = linkedMapOf<String, PhotoTagOption>()
+    val blocks = linkedMapOf<String, PhotoTagOption>()
+    val locations = linkedMapOf<String, PhotoTagOption>()
+
+    fun normalized(value: String) = value.trim().lowercase(Locale.ROOT)
+    fun add(target: MutableMap<String, PhotoTagOption>, value: String, label: String = value) {
+        val key = normalized(value)
+        if (key.isNotEmpty()) target.putIfAbsent(key, PhotoTagOption(key, label))
+    }
+    fun titleWords(value: String) = value.split('_')
+        .filter(String::isNotBlank)
+        .joinToString(" ") { word -> word.lowercase(Locale.ROOT).replaceFirstChar { it.titlecase(Locale.ROOT) } }
+
+    hashtagRegex.findAll(note.orEmpty()).forEach { match ->
+        val rawTag = match.groupValues[1]
+        if (rawTag.startsWith("blok_", ignoreCase = true)) {
+            val blockAndLocation = rawTag.substringAfter('_')
+            val separator = blockAndLocation.indexOf('_')
+            val blockCode = if (separator < 0) blockAndLocation else blockAndLocation.substring(0, separator)
+            val location = if (separator < 0) "" else blockAndLocation.substring(separator + 1)
+            add(blocks, blockCode)
+            add(locations, location, location.replace('_', ' '))
+        } else {
+            add(categories, rawTag, titleWords(rawTag))
+        }
+    }
+
+    fun sorted(values: Map<String, PhotoTagOption>) = values.values.sortedBy { it.label.lowercase(Locale.ROOT) }
+    return PhotoTagFacets(sorted(categories), sorted(blocks), sorted(locations))
+}
+
+/** Combines facets from saved photo notes, deduplicating values case-insensitively. */
+fun collectPhotoTagFacets(notes: Iterable<String?>): PhotoTagFacets {
+    val categories = linkedMapOf<String, PhotoTagOption>()
+    val blocks = linkedMapOf<String, PhotoTagOption>()
+    val locations = linkedMapOf<String, PhotoTagOption>()
+    notes.forEach { note ->
+        val facets = extractPhotoTagFacets(note)
+        facets.categories.forEach { categories.putIfAbsent(it.key, it) }
+        facets.blocks.forEach { blocks.putIfAbsent(it.key, it) }
+        facets.locations.forEach { locations.putIfAbsent(it.key, it) }
+    }
+    fun sorted(values: Map<String, PhotoTagOption>) = values.values.sortedBy { it.label.lowercase(Locale.ROOT) }
+    return PhotoTagFacets(sorted(categories), sorted(blocks), sorted(locations))
+}
+
+fun matchesPhotoTagFilter(note: String?, filter: PhotoTagFilter): Boolean {
+    val facets = extractPhotoTagFacets(note)
+    val options = when (filter.kind) {
+        PhotoTagKind.CATEGORY -> facets.categories
+        PhotoTagKind.BLOCK -> facets.blocks
+        PhotoTagKind.LOCATION -> facets.locations
+    }
+    return options.any { it.key == filter.key.trim().lowercase(Locale.ROOT) }
+}
+
 /** Returns canonical, case-insensitive hashtag categories from a photo note. */
 fun extractPhotoTags(note: String?): Set<String> =
     hashtagRegex.findAll(note.orEmpty())
@@ -33,11 +105,11 @@ fun photoTagColorArgb(tag: String): Int {
 }
 
 /** Colors a single photo pin from the first hashtag in its saved note. */
-fun photoPinColorArgb(note: String?): Int =
-    extractPhotoTags(note).firstOrNull()?.let(::photoTagColorArgb) ?: 0xFFDC2D2D.toInt()
+fun photoPinColorArgb(note: String?, colorForTag: (String) -> Int = ::photoTagColorArgb): Int =
+    extractPhotoTags(note).firstOrNull()?.let(colorForTag) ?: 0xFFDC2D2D.toInt()
 
 /** Chooses the dominant category color for a cluster; untagged photos remain red. */
-fun photoMarkerColorArgb(tags: List<String?>): Int {
+fun photoMarkerColorArgb(tags: List<String?>, colorForTag: (String) -> Int = ::photoTagColorArgb): Int {
     val dominantTag = tags
         .filterNotNull()
         .map { it.trim().lowercase(Locale.ROOT) }
@@ -48,7 +120,7 @@ fun photoMarkerColorArgb(tags: List<String?>): Int {
         .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
         .firstOrNull()
         ?.key
-    return dominantTag?.let(::photoTagColorArgb) ?: 0xFFDC2D2D.toInt()
+    return dominantTag?.let(colorForTag) ?: 0xFFDC2D2D.toInt()
 }
 
 /** Existing categories that match the hashtag currently being typed. */

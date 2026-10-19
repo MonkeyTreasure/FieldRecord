@@ -1,126 +1,174 @@
 package com.fieldrecord.presentation.note
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.hilt.navigation.compose.hiltViewModel
 import com.fieldrecord.domain.model.FieldPhoto
 import com.fieldrecord.domain.model.extractPhotoTags
-import com.fieldrecord.domain.model.photoTagSuggestions
-import com.fieldrecord.domain.model.applyPhotoTagSuggestion
-import com.fieldrecord.domain.model.photoTagColorArgb
 import com.fieldrecord.presentation.PhotoNoteText
 import com.fieldrecord.presentation.photo.PhotoFullscreenViewer
-import java.text.SimpleDateFormat
-import java.util.*
+
+private val photoSequencePattern = Regex("^IMG_\\d{6}_(\\d{3,})(?:_|\\.)", RegexOption.IGNORE_CASE)
+private val noteHashtagPattern = Regex("(?<![\\p{L}\\p{N}_])#[\\p{L}\\p{N}_-]+")
 
 @Composable
 fun NoteScreen(
-    viewModel: NoteViewModel = hiltViewModel()
+    photos: List<FieldPhoto>,
+    onSaveNote: suspend (photoId: Long, note: String?) -> Unit
 ) {
-    val photos by viewModel.notedPhotos.collectAsState()
     var query by remember { mutableStateOf("") }
-    var editPhoto by remember { mutableStateOf<FieldPhoto?>(null) }
-    var editNote by remember { mutableStateOf("") }
     var viewerPhotos by remember { mutableStateOf<List<FieldPhoto>?>(null) }
     var viewerIndex by remember { mutableIntStateOf(0) }
-    val knownTags = remember(photos) { photos.flatMap { extractPhotoTags(it.note) }.toSet() }
-    val noteTagSuggestions = photoTagSuggestions(editNote, knownTags)
-    val filtered = remember(photos, query) {
-        if (query.isBlank()) photos else photos.filter {
-            (it.note?.contains(query, true) == true) || it.fileName.contains(query, true)
+    val notedPhotos = remember(photos) {
+        photos.filter { !it.note.isNullOrBlank() }.sortedByDescending { it.timestamp }
+    }
+    val filteredPhotos = remember(notedPhotos, query) {
+        val normalizedQuery = query.trim()
+        if (normalizedQuery.isBlank()) notedPhotos else notedPhotos.filter { photo ->
+            val tags = extractPhotoTags(photo.note).joinToString(" ") { "#$it" }
+            val sequence = imageSeries(photo.fileName)
+            photo.note.orEmpty().contains(normalizedQuery, ignoreCase = true) ||
+                tags.contains(normalizedQuery, ignoreCase = true) ||
+                photo.fileName.contains(normalizedQuery, ignoreCase = true) ||
+                sequence.contains(normalizedQuery, ignoreCase = true)
         }
     }
+    val knownTags = remember(photos) { photos.flatMap { extractPhotoTags(it.note) }.toSet() }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        // header fixed
-        Surface(elevation = 4.dp) {
-            Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
-                Text("Catatan Foto", style = MaterialTheme.typography.subtitle1)
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    placeholder = { Text("Cari note / filename", fontSize = 13.sp) },
-                    leadingIcon = { Icon(Icons.Default.Search, null) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Text("${filtered.size} foto bernote", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(top=4.dp))
-            }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colors.background)
+            .statusBarsPadding()
+            .padding(horizontal = 12.dp)
+    ) {
+        Text(
+            "Noted",
+            color = Color.White,
+            style = MaterialTheme.typography.h6,
+            modifier = Modifier.padding(top = 8.dp, bottom = 10.dp)
+        )
+        TextField(
+            value = query,
+            onValueChange = { query = it },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            textStyle = TextStyle(color = Color.White),
+            placeholder = { Text("Search notes, tags, or image series…", color = Color.White.copy(alpha = 0.75f)) },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search notes", tint = Color.White) },
+            trailingIcon = if (query.isNotEmpty()) ({
+                IconButton(onClick = { query = "" }) {
+                    Icon(Icons.Default.Close, contentDescription = "Clear search", tint = Color.White)
+                }
+            }) else null,
+            shape = RoundedCornerShape(24.dp),
+            colors = TextFieldDefaults.textFieldColors(
+                backgroundColor = Color(0xFF808080).copy(alpha = 0.5f),
+                textColor = Color.White,
+                cursorColor = Color.White,
+                placeholderColor = Color.White.copy(alpha = 0.75f),
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent
+            )
+        )
+        Spacer(Modifier.height(12.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF512DA8), RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+                .padding(horizontal = 10.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Image series", modifier = Modifier.weight(0.85f), color = Color.White, fontSize = 11.sp, maxLines = 2)
+            Text("Tag", modifier = Modifier.weight(1.35f), color = Color.White, fontSize = 11.sp)
+            Text("Note", modifier = Modifier.weight(1.8f), color = Color.White, fontSize = 11.sp)
         }
-        if (filtered.isEmpty()) {
+        if (filteredPhotos.isEmpty()) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text("Belum ada catatan", color = Color.Gray)
+                Text(
+                    if (notedPhotos.isEmpty()) "No photo notes yet" else "No matching notes",
+                    color = Color.White.copy(alpha = 0.75f)
+                )
             }
         } else {
-            LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(filtered, key = { it.id }) { photo ->
-                    Card(elevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
-                        Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(photo.fileName, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date(photo.timestamp)), fontSize = 11.sp, color = Color.Gray)
-                                Spacer(Modifier.height(4.dp))
-                                PhotoNoteText(
-                                    note = photo.note.orEmpty(),
-                                    defaultColor = Color.Black,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    style = MaterialTheme.typography.body2,
-                                    maxLines = 3,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+            LazyColumn(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentPadding = PaddingValues(bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(1.dp)
+            ) {
+                itemsIndexed(filteredPhotos, key = { _, photo -> photo.id }) { index, photo ->
+                    val tags = extractPhotoTags(photo.note).joinToString(" ") { "#$it" }.ifBlank { "—" }
+                    val noteText = noteHashtagPattern.replace(photo.note.orEmpty(), " ").replace(Regex("\\s+"), " ").trim().ifBlank { "—" }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF673AB7), RoundedCornerShape(6.dp))
+                            .clickable {
+                                viewerPhotos = filteredPhotos
+                                viewerIndex = index
                             }
-                            IconButton(onClick = { editPhoto = photo; editNote = photo.note ?: "" }) {
-                                Icon(Icons.Default.Edit, "Edit", tint = Color(0xFF2E7D32))
-                            }
+                            .padding(horizontal = 10.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            imageSeries(photo.fileName),
+                            modifier = Modifier.weight(0.85f),
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (tags == "—") {
+                            Text("—", modifier = Modifier.weight(1.35f), color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+                        } else {
+                            PhotoNoteText(
+                                note = tags,
+                                modifier = Modifier.weight(1.35f),
+                                defaultColor = Color.White,
+                                style = MaterialTheme.typography.body2.copy(fontSize = 11.sp),
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
+                        Text(
+                            noteText,
+                            modifier = Modifier.weight(1.8f),
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
             }
         }
-    }
-
-    editPhoto?.let { p ->
-        AlertDialog(
-            onDismissRequest = { editPhoto = null },
-            title = { Text("Edit catatan") },
-            text = {
-                OutlinedTextField(value = editNote, onValueChange = { editNote = it }, placeholder = { Text("Catatan; gunakan #tag untuk kategori") }, modifier = Modifier.fillMaxWidth())
-                if (noteTagSuggestions.isNotEmpty()) {
-                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                        noteTagSuggestions.forEach { tag ->
-                            TextButton(onClick = { editNote = applyPhotoTagSuggestion(editNote, tag) }) {
-                                Text("#$tag", color = Color(photoTagColorArgb(tag)))
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.updateNote(p.id, editNote.ifBlank { null })
-                    editPhoto = null
-                }) { Text("Simpan", color = Color(0xFF2E7D32)) }
-            },
-            dismissButton = { TextButton(onClick = { editPhoto = null }) { Text("Batal") } }
-        )
     }
 
     viewerPhotos?.let { list ->
-        PhotoFullscreenViewer(photos = list, initialIndex = viewerIndex, knownTags = knownTags, onDismiss = { viewerPhotos = null }, onSaveNote = { id, n -> viewModel.updateNote(id, n) })
+        PhotoFullscreenViewer(
+            photos = list,
+            initialIndex = viewerIndex,
+            knownTags = knownTags,
+            onDismiss = { viewerPhotos = null },
+            onSaveNote = onSaveNote
+        )
     }
 }
+
+private fun imageSeries(fileName: String): String =
+    photoSequencePattern.find(fileName)?.groupValues?.getOrNull(1) ?: "—"

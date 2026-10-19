@@ -8,7 +8,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
-import com.fieldrecord.domain.model.photoTagColorArgb
+import com.fieldrecord.domain.model.extractPhotoTags
+import com.fieldrecord.data.local.PhotoTagColorStore
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.remember
 
 private val hashtagPattern = Regex("(?<![\\p{L}\\p{N}_])#[\\p{L}\\p{N}_-]+")
 
@@ -16,16 +19,21 @@ private val hashtagPattern = Regex("(?<![\\p{L}\\p{N}_])#[\\p{L}\\p{N}_-]+")
 fun PhotoNoteText(
     note: String,
     modifier: Modifier = Modifier,
-    defaultColor: Color = Color.Black,
+    defaultColor: Color = Color.White,
     style: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.body1,
     maxLines: Int = Int.MAX_VALUE,
     overflow: TextOverflow = TextOverflow.Clip
 ) {
+    val context = LocalContext.current
+    val colorStore = remember(context) { PhotoTagColorStore(context) }
+    val tags = remember(note) { extractPhotoTags(note) }
+    colorStore.ensureTags(tags)
     val annotatedNote = buildAnnotatedString {
         var cursor = 0
         hashtagPattern.findAll(note).forEach { match ->
             append(note.substring(cursor, match.range.first))
-            pushStyle(SpanStyle(color = Color(photoTagColorArgb(match.value.drop(1)))))
+            val tagColor = Color(colorStore.colorFor(match.value.drop(1)))
+            pushStyle(SpanStyle(color = Color.White, background = tagColor))
             append(match.value)
             pop()
             cursor = match.range.last + 1

@@ -32,4 +32,7 @@ interface FieldPhotoDao {
     
     @Query("DELETE FROM field_photos WHERE id = :id")
     suspend fun deleteById(id: Long)
+
+    @Query("SELECT * FROM field_photos WHERE latitude = :lat AND longitude = :lon AND timestamp = :timestamp LIMIT 1")
+    suspend fun findByMetadata(lat: Double, lon: Double, timestamp: Long): FieldPhotoEntity?
 }

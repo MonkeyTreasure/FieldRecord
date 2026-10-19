@@ -1,10 +1,12 @@
 package com.fieldrecord.presentation.gallery
 
+import android.content.ClipData
 import android.content.Intent
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.border
@@ -36,7 +38,12 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.paging.compose.collectAsLazyPagingItems
 import coil.compose.rememberAsyncImagePainter
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import com.fieldrecord.data.local.PhotoTagColorStore
 import com.fieldrecord.domain.model.FieldPhoto
+import com.fieldrecord.domain.model.extractPhotoTags
+import com.fieldrecord.presentation.camera.PhotoFileManager
 import com.fieldrecord.presentation.photo.PhotoFullscreenViewer
 import java.io.File
 
@@ -46,6 +53,7 @@ fun GalleryScreen(
     viewModel: GalleryViewModel
 ) {
     val context = LocalContext.current
+    val tagColorStore = remember(context) { PhotoTagColorStore(context) }
     val haptics = LocalHapticFeedback.current
     val lazyPagingItems = viewModel.pager.collectAsLazyPagingItems()
     val monthLabel = viewModel.getCurrentMonthLabel()
@@ -110,14 +118,14 @@ fun GalleryScreen(
                         Row {
                             IconButton(onClick = {
                                 val selected = loadedPhotos.filter { it.id in selectedIds }
-                                sharePhotosToWhatsApp(context, selected)
-                            }) { Icon(Icons.Default.Share, "Bagikan ke WhatsApp") }
+                                showMultiShareDialog(context, selected)
+                            }) { Icon(Icons.Default.Share, "Bagikan") }
                             IconButton(onClick = {
                                 selectedIds = if (selectedIds.size == loadedPhotos.size) emptySet()
                                 else loadedPhotos.map { it.id }.toSet()
                             }) { Icon(Icons.Default.SelectAll, "Pilih semua") }
                             IconButton(onClick = { showDeleteConfirm = true }) {
-                                Icon(Icons.Default.Delete, "Hapus foto terpilih", tint = MaterialTheme.colors.error)
+                                Icon(Icons.Default.Delete, "Hapus foto terpilih", tint = Color.White)
                             }
                             IconButton(onClick = { selectedIds = emptySet() }) {
                                 Icon(Icons.Default.Close, "Batalkan pilihan")
@@ -175,6 +183,8 @@ fun GalleryScreen(
                 items(lazyPagingItems.itemCount, key = { index -> lazyPagingItems.peek(index)?.id ?: index }) { index ->
                 val photo = lazyPagingItems[index] ?: return@items
                 val selected = photo.id in selectedIds
+                val firstTag = remember(photo.note) { extractPhotoTags(photo.note).firstOrNull() }
+                val tagColor = if (firstTag == null) null else remember(firstTag) { tagColorStore.colorFor(firstTag) }
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -199,15 +209,29 @@ fun GalleryScreen(
                                 selectedIds = if (selected) selectedIds - photo.id else selectedIds + photo.id
                             }
                         ),
-                    backgroundColor = if (selected) Color(0xFF2E7D32).copy(alpha = 0.7f) else MaterialTheme.colors.surface,
+                    backgroundColor = if (selected) Color(0xFF673AB7).copy(alpha = 0.7f) else MaterialTheme.colors.surface,
                     elevation = 2.dp
                 ) {
-                    androidx.compose.foundation.Image(
-                        painter = rememberAsyncImagePainter(File(photo.filePath)),
-                        contentDescription = photo.fileName,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
+                    Box(Modifier.fillMaxSize()) {
+                        androidx.compose.foundation.Image(
+                            painter = rememberAsyncImagePainter(File(photo.filePath)),
+                            contentDescription = photo.fileName,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                        if (firstTag != null && tagColor != null) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(4.dp)
+                                    .size(11.dp)
+                                    .clip(RoundedCornerShape(3.dp))
+                                    .background(Color(tagColor), RoundedCornerShape(3.dp))
+                                    .border(0.75.dp, Color.White.copy(alpha = 0.9f), RoundedCornerShape(3.dp))
+                                    .semantics { contentDescription = "Photo tagged #$firstTag" }
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -250,6 +274,48 @@ fun GalleryScreen(
     }
 }
 
+private fun showMultiShareDialog(context: android.content.Context, photos: List<FieldPhoto>) {
+    if (photos.isEmpty()) return
+    val dialog = android.app.AlertDialog.Builder(context)
+        .setTitle("Pilih Opsi Berbagi (${photos.size} Foto)")
+        .setItems(arrayOf("Share Foto & Note Saja", "Share Data dengan .field")) { _, which ->
+            if (which == 0) {
+                sharePhotosToWhatsApp(context, photos)
+            } else {
+                sharePhotosAsFieldFile(context, photos)
+            }
+        }
+        .setOnCancelListener { }
+        .create()
+    dialog.setCanceledOnTouchOutside(true)
+    dialog.show()
+}
+
+private fun sharePhotosAsFieldFile(context: android.content.Context, photos: List<FieldPhoto>) {
+    val combinedData = photos.joinToString(separator = "\n---\n") { photo ->
+        val photoFile = File(photo.filePath)
+        val base64Photo = if (photoFile.exists()) {
+            android.util.Base64.encodeToString(photoFile.readBytes(), android.util.Base64.NO_WRAP)
+        } else ""
+        val photographer = PhotoFileManager.photographerStampFromFilename(photo.fileName).orEmpty()
+        "PhotoName=${photo.fileName}\nPhotographer=$photographer\nPhotoStorage=FieldRecord/Photo/${photo.fileName}\nLat=${photo.latitude}\nLon=${photo.longitude}\nTimestamp=${photo.timestamp}\nNote=${photo.note ?: ""}\nPhotoBase64=$base64Photo"
+    }
+    val file = File(context.cacheDir, "multivisit_${System.currentTimeMillis()}.field")
+    file.writeText(combinedData)
+    val fileUri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "application/octet-stream"
+        putExtra(Intent.EXTRA_STREAM, fileUri)
+        clipData = ClipData.newUri(context.contentResolver, file.name, fileUri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    try {
+        context.startActivity(Intent.createChooser(intent, "Bagikan data .field"))
+    } catch (e: Exception) {
+        android.widget.Toast.makeText(context, "Gagal membagikan: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+    }
+}
+
 private fun sharePhotosToWhatsApp(context: android.content.Context, photos: List<FieldPhoto>) {
     if (photos.isEmpty()) return
     val uris = photos.mapNotNull { photo ->
@@ -259,14 +325,15 @@ private fun sharePhotosToWhatsApp(context: android.content.Context, photos: List
         )
     }
     if (uris.isEmpty()) return
-    val combinedText = photos.joinToString(separator = "\n\n---\n\n") { photo ->
+    val locationLink = "https://fieldrecord.redmonkey.my.id/share?lat=" + photos.joinToString(separator = "|") { "${it.latitude},${it.longitude},${android.net.Uri.encode(it.note ?: "")}" }
+    val photoStamps = photos.joinToString(separator = "\n\n") { photo ->
+        val photographer = PhotoFileManager.photographerStampFromFilename(photo.fileName)
         buildString {
-            append("Koordinat: ${photo.latitude}, ${photo.longitude}")
-            if (!photo.note.isNullOrBlank()) {
-                append("\n\n").append(photo.note)
-            }
+            append("Nama foto: ${photo.fileName}")
+            if (!photographer.isNullOrBlank()) append("\nDiambil oleh: $photographer")
         }
     }
+    val combinedText = "$locationLink\n\n$photoStamps"
     val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
         type = "image/jpeg"
         putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))

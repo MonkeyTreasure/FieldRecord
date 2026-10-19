@@ -68,6 +68,10 @@ class FieldPhotoRepositoryImpl @Inject constructor(
         return dao.insertPhoto(photo.toEntity())
     }
 
+    override suspend fun findByMetadata(lat: Double, lon: Double, timestamp: Long): FieldPhoto? {
+        return dao.findByMetadata(lat, lon, timestamp)?.toDomain()
+    }
+
     override suspend fun deletePhoto(photo: FieldPhoto) {
         dao.deletePhoto(photo.toEntity())
     }

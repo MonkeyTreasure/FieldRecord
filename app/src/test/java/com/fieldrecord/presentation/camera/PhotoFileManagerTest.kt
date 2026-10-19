@@ -31,4 +31,31 @@ class PhotoFileManagerTest {
     fun sequenceMayExceedThreeDigitsWithoutCollision() {
         assertEquals("IMG_260925_1000.jpg", PhotoFileManager.formatFilename("260925", 1000))
     }
+
+    @Test
+    fun filenameIncludesSanitizedPhotographerName() {
+        assertEquals(
+            "IMG_260925_001_Novianto_Syahmud.jpg",
+            PhotoFileManager.formatFilename("260925", 1, "Novianto Syahmud")
+        )
+    }
+
+    @Test
+    fun monthlySequenceRecognizesNamesAddedToPreviousPhotos() {
+        val files = listOf("IMG_261001_001_Novianto_Syahmud.jpg", "IMG_261002_004_Ani.jpg")
+        assertEquals(5, PhotoFileManager.nextMonthlySequence("261003", files))
+    }
+
+    @Test
+    fun photographerCanBeReadFromStampedFilename() {
+        assertEquals(
+            "Novianto Syahmud",
+            PhotoFileManager.photographerStampFromFilename("IMG_260925_001_Novianto_Syahmud.jpg")
+        )
+    }
+
+    @Test
+    fun userNameSanitizerRemovesPathSeparators() {
+        assertEquals("Novianto_Syahmud", PhotoFileManager.sanitizeUserNameForFilename("Novianto/Syahmud"))
+    }
 }

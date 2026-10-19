@@ -81,6 +81,7 @@ dependencies {
     implementation("androidx.camera:camera-camera2:$cameraXVersion")
     implementation("androidx.camera:camera-lifecycle:$cameraXVersion")
     implementation("androidx.camera:camera-view:$cameraXVersion")
+    implementation("androidx.camera:camera-video:$cameraXVersion")
 
     // MapLibre
     implementation("org.maplibre.gl:android-sdk:11.5.0")

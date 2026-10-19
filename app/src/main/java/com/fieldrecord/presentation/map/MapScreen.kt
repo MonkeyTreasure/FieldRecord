@@ -16,6 +16,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.border
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material.*
@@ -37,7 +39,11 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.fieldrecord.LocalAppIconColor
+import com.fieldrecord.data.local.PhotoTagColorStore
 import com.fieldrecord.domain.model.FieldPhoto
+import com.fieldrecord.domain.model.PhotoTagFilter
+import com.fieldrecord.domain.model.matchesPhotoTagFilter
 import com.fieldrecord.domain.model.extractPhotoTags
 import com.fieldrecord.domain.model.photoMarkerColorArgb
 import com.fieldrecord.domain.model.photoPinColorArgb
@@ -65,7 +71,10 @@ fun MapScreen(
     photos: List<FieldPhoto>,
     onPhotoClick: (FieldPhoto) -> Unit,
     onClusterClick: (List<Long>) -> Unit = {},
-    onSavePhotoNote: suspend (Long, String?) -> Unit
+    onSavePhotoNote: suspend (Long, String?) -> Unit,
+    tagFilter: PhotoTagFilter? = null,
+    onClearTagFilter: () -> Unit = {},
+    mapOpenRequest: Int = 0
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -86,15 +95,63 @@ fun MapScreen(
     var isFollowingLocation by remember { mutableStateOf(false) }
     var hasUserExploredMap by remember { mutableStateOf(false) }
     var cameraRefresh by remember { mutableIntStateOf(0) }
+    var mapZoom by remember { mutableFloatStateOf(16f) }
     var noteSearchQuery by remember { mutableStateOf("") }
-    val noteSearchResults = remember(photos, noteSearchQuery) {
+    val tagFilteredPhotos = remember(photos, tagFilter) {
+        if (tagFilter == null) photos else photos.filter { matchesPhotoTagFilter(it.note, tagFilter) }
+    }
+    val noteSearchResults = remember(tagFilteredPhotos, noteSearchQuery) {
         val query = noteSearchQuery.trim()
-        if (query.isBlank()) emptyList() else photos.filter { !it.note.isNullOrBlank() && it.note.contains(query, ignoreCase = true) }
+        if (query.isBlank()) emptyList() else tagFilteredPhotos.filter { !it.note.isNullOrBlank() && it.note.contains(query, ignoreCase = true) }
             .sortedByDescending { it.timestamp }
+    }
+    LaunchedEffect(tagFilter) {
+        noteSearchQuery = ""
     }
     val latestPhotos by rememberUpdatedState(photos)
     val latestOnPhotoClick by rememberUpdatedState(onPhotoClick)
     val latestOnClusterClick by rememberUpdatedState(onClusterClick)
+
+    // Handle deep link from shared location
+    val deepLinkLat = remember { mutableStateOf<Double?>(null) }
+    val deepLinkLon = remember { mutableStateOf<Double?>(null) }
+    val deepLinkNote = remember { mutableStateOf<String>("") }
+    LaunchedEffect(Unit) {
+        val prefs = context.getSharedPreferences("field_record_deep_link", Context.MODE_PRIVATE)
+        val latStr = prefs.getString("deep_link_lat", "") ?: ""
+        val lonStr = prefs.getString("deep_link_lon", "") ?: ""
+        val noteStr = prefs.getString("deep_link_note", "") ?: ""
+        if (latStr.isNotBlank() && lonStr.isNotBlank()) {
+            deepLinkLat.value = latStr.toDoubleOrNull()
+            deepLinkLon.value = lonStr.toDoubleOrNull()
+            deepLinkNote.value = noteStr
+            prefs.edit().clear().apply()
+        }
+    }
+
+    // Animate to deep link location when map is ready
+    LaunchedEffect(mapLibreMapRef, deepLinkLat.value, deepLinkLon.value) {
+        if (deepLinkLat.value != null && deepLinkLon.value != null && mapLibreMapRef != null) {
+            val latLng = LatLng(deepLinkLat.value!!, deepLinkLon.value!!)
+            mapLibreMapRef!!.animateCamera(
+                CameraUpdateFactory.newLatLngZoom(latLng, 16.0),
+                1000
+            )
+            // Show a toast or marker for the shared location
+            val marker = MarkerOptions()
+                .position(latLng)
+                .title("Shared Location")
+                .snippet(deepLinkNote.value)
+            mapLibreMapRef!!.addMarker(marker)
+            if (deepLinkNote.value.isNotBlank()) {
+                // Show note in a toast or bottom sheet
+                android.widget.Toast.makeText(context, "Dibagikan ke: ${deepLinkNote.value}", android.widget.Toast.LENGTH_LONG).show()
+            }
+            deepLinkLat.value = null
+            deepLinkLon.value = null
+            deepLinkNote.value = ""
+        }
+    }
 
     // Raster basemaps avoid the demo vector tiles' "Map data not yet available" at high zoom.
     val streetStyle = """{"version":8,"sources":{"osm-street":{"type":"raster","tiles":["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],"tileSize":256,"attribution":"© OpenStreetMap contributors"}},"layers":[{"id":"osm-street-layer","type":"raster","source":"osm-street"}]}"""
@@ -142,7 +199,7 @@ fun MapScreen(
                     mapLibreMapRef?.let { map ->
                         if (firstFix) {
                             if (!hasUserExploredMap) {
-                                map.animateCamera(CameraUpdateFactory.newLatLngZoom(newLatLng, 16.0))
+                                map.animateCamera(CameraUpdateFactory.newLatLngZoom(newLatLng, 12.0))
                             }
                             firstFix = false
                         } else if (isFollowingLocation) {
@@ -168,6 +225,12 @@ fun MapScreen(
         }
     }
 
+    LaunchedEffect(mapOpenRequest, mapLibreMapRef) {
+        if (mapOpenRequest > 0) {
+            mapLibreMapRef?.animateCamera(CameraUpdateFactory.zoomTo(12.0))
+        }
+    }
+
     LaunchedEffect(noteSearchQuery, noteSearchResults, mapLibreMapRef) {
         val matchedPhoto = noteSearchResults.firstOrNull()
         if (noteSearchQuery.isNotBlank() && matchedPhoto != null) {
@@ -178,7 +241,17 @@ fun MapScreen(
         }
     }
 
-    Box(modifier = modifier.background(Color(0xFFE8F0E8))) {
+    LaunchedEffect(tagFilter, tagFilteredPhotos, mapLibreMapRef) {
+        val firstTaggedPhoto = tagFilteredPhotos.firstOrNull()
+        if (tagFilter != null && firstTaggedPhoto != null) {
+            isFollowingLocation = false
+            mapLibreMapRef?.animateCamera(
+                CameraUpdateFactory.newLatLngZoom(LatLng(firstTaggedPhoto.latitude, firstTaggedPhoto.longitude), 16.0)
+            )
+        }
+    }
+
+    Box(modifier = modifier.background(MaterialTheme.colors.background)) {
         AndroidView(
             factory = { ctx ->
                 MapView(ctx).apply {
@@ -192,6 +265,8 @@ fun MapScreen(
                             Style.Builder().fromJson(streetStyle)
                         }
                         map.setStyle(initialStyle)
+                        map.moveCamera(CameraUpdateFactory.zoomTo(12.0))
+                        mapZoom = 12f
                         map.uiSettings.isCompassEnabled = true
                         map.uiSettings.isZoomGesturesEnabled = true
                         map.uiSettings.isRotateGesturesEnabled = true
@@ -203,7 +278,10 @@ fun MapScreen(
                                 isFollowingLocation = false
                             }
                         }
-                        map.addOnCameraIdleListener { cameraRefresh++ }
+                        map.addOnCameraIdleListener {
+                            mapZoom = map.cameraPosition.zoom.toFloat()
+                            cameraRefresh++
+                        }
                         map.setOnMarkerClickListener { marker ->
                                                     val markerTitle = marker.title.orEmpty()
                                                     when {
@@ -242,7 +320,8 @@ fun MapScreen(
                                 MarkerOptions().position(latLng).icon(icon).title("Lokasi Saya")
                             )
                         }
-                        renderPhotoMarkers(map, context, photos)
+                        val filteredPhotos = if (noteSearchQuery.isBlank()) tagFilteredPhotos else noteSearchResults
+                        renderPhotoMarkers(map, context, filteredPhotos)
                     }
                 }
             }
@@ -252,14 +331,43 @@ fun MapScreen(
         Column(
             modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
+            tagFilter?.let { activeFilter ->
+                Surface(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colors.surface,
+                    elevation = 4.dp
+                ) {
+                    Row(
+                        modifier = Modifier.padding(start = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val filterType = when (activeFilter.kind) {
+                            com.fieldrecord.domain.model.PhotoTagKind.CATEGORY -> "Kategori"
+                            com.fieldrecord.domain.model.PhotoTagKind.BLOCK -> "Blok"
+                            com.fieldrecord.domain.model.PhotoTagKind.LOCATION -> "Lokasi"
+                        }
+                        Text(
+                            text = "$filterType: ${activeFilter.label}",
+                            modifier = Modifier.weight(1f),
+                            color = MaterialTheme.colors.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        IconButton(onClick = onClearTagFilter) {
+                            Icon(Icons.Default.Close, contentDescription = "Hapus filter tag", tint = LocalAppIconColor.current)
+                        }
+                    }
+                }
+            }
             TextField(
                 value = noteSearchQuery,
                 onValueChange = { noteSearchQuery = it },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                textStyle = androidx.compose.ui.text.TextStyle(color = Color.Black),
-                placeholder = { Text("Cari catatan foto…", color = Color.DarkGray) },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Cari catatan foto") },
+                textStyle = androidx.compose.ui.text.TextStyle(color = MaterialTheme.colors.onSurface),
+                placeholder = { Text("Cari catatan foto…", color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)) },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Cari catatan foto", tint = Color.White) },
                 trailingIcon = if (noteSearchQuery.isNotEmpty()) ({
                     IconButton(onClick = { noteSearchQuery = "" }) {
                         Icon(Icons.Default.Close, contentDescription = "Hapus pencarian")
@@ -267,7 +375,9 @@ fun MapScreen(
                 }) else null,
                 shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
                 colors = TextFieldDefaults.textFieldColors(
-                    backgroundColor = Color.White,
+                    backgroundColor = Color(0xFF808080).copy(alpha = 0.5f),
+                    cursorColor = Color.White,
+                    placeholderColor = Color.White.copy(alpha = 0.75f),
                     focusedIndicatorColor = Color.Transparent,
                     unfocusedIndicatorColor = Color.Transparent
                 )
@@ -277,24 +387,24 @@ fun MapScreen(
                 Surface(
                     modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp),
                     shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
-                    color = Color.White,
+                    color = MaterialTheme.colors.surface,
                     elevation = 6.dp
                 ) {
                     if (noteSearchResults.isEmpty()) {
-                        Text("Catatan tidak ditemukan", modifier = Modifier.padding(14.dp), color = Color.DarkGray)
+                        Text("Catatan tidak ditemukan", modifier = Modifier.padding(14.dp), color = MaterialTheme.colors.onSurface.copy(alpha = 0.65f))
                     } else {
                         Column(modifier = Modifier.verticalScroll(rememberScrollState()).padding(8.dp)) {
                             noteSearchResults.forEachIndexed { index, photo ->
                                 Column(
                                     modifier = Modifier.fillMaxWidth()
                                         .padding(vertical = 4.dp)
-                                        .background(Color(0xFFF4F7F4), androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                                        .background(MaterialTheme.colors.background, androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
                                         .clickable { onPhotoClick(photo) }
                                         .padding(horizontal = 12.dp, vertical = 10.dp)
                                 ) {
                                     PhotoNoteText(
                                         note = photo.note.orEmpty(),
-                                        defaultColor = Color.Black,
+                                        defaultColor = MaterialTheme.colors.onSurface,
                                         style = MaterialTheme.typography.body2
                                     )
                                 }
@@ -310,6 +420,26 @@ fun MapScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp),
             horizontalAlignment = Alignment.End
         ) {
+            // Round map-zoom selector, styled like the camera zoom badge, directly above map-layer toggle.
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .background(MaterialTheme.colors.surface, CircleShape)
+                    .border(1.5.dp, Color.White, CircleShape)
+                    .clickable {
+                        val presets = listOf(5f, 8f, 11f, 14f, 17f)
+                        val nextZoom = presets.firstOrNull { it > mapZoom + 0.25f } ?: presets.first()
+                        mapLibreMapRef?.animateCamera(CameraUpdateFactory.zoomTo(nextZoom.toDouble()))
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "${String.format(Locale.US, "%.1f", mapZoom)}×",
+                    color = Color.White,
+                    style = MaterialTheme.typography.caption
+                )
+            }
+
             // Layer switcher FAB (Street vs Satellite)
             FloatingActionButton(
                 onClick = {
@@ -321,8 +451,8 @@ fun MapScreen(
                     }
                     mapLibreMapRef?.setStyle(nextStyle)
                 },
-                backgroundColor = Color.White,
-                contentColor = Color(0xFF2E7D32)
+                backgroundColor = MaterialTheme.colors.surface,
+                contentColor = LocalAppIconColor.current
             ) { Icon(Icons.Default.Layers, contentDescription = if (isSatellite) "Lapisan Satelit (ketuk untuk Street)" else "Lapisan Street (ketuk untuk Satelit)") }
 
             // North lock / Free look toggle FAB
@@ -333,8 +463,8 @@ fun MapScreen(
                         mapLibreMapRef?.animateCamera(CameraUpdateFactory.bearingTo(0.0))
                     }
                 },
-                backgroundColor = if (isNorthLocked) Color.White else Color.Blue,
-                contentColor = if (isNorthLocked) Color.Black else Color.White
+                backgroundColor = MaterialTheme.colors.primary,
+                contentColor = Color.White
             ) {
                 Icon(
                     imageVector = Icons.Default.Navigation,
@@ -352,8 +482,8 @@ fun MapScreen(
                         mapLibreMapRef?.animateCamera(CameraUpdateFactory.bearingTo(0.0))
                     }
                 },
-                backgroundColor = if (isFollowingLocation) Color(0xFF1E69EB) else Color.White,
-                contentColor = if (isFollowingLocation) Color.White else Color(0xFF1E69EB)
+                backgroundColor = MaterialTheme.colors.primary,
+                contentColor = Color.White
             ) {
                 Icon(
                     Icons.Default.MyLocation,
@@ -366,6 +496,9 @@ fun MapScreen(
 }
 
 private fun renderPhotoMarkers(map: MapLibreMap, context: Context, photos: List<FieldPhoto>) {
+    val tagColorStore = PhotoTagColorStore(context)
+    tagColorStore.ensureTags(photos.flatMap { extractPhotoTags(it.note) })
+    val colorForTag: (String) -> Int = tagColorStore::colorFor
     val validPhotos = photos.filter { photo ->
         photo.latitude.isFinite() && photo.longitude.isFinite() &&
             photo.latitude in -90.0..90.0 && photo.longitude in -180.0..180.0 &&
@@ -415,9 +548,9 @@ private fun renderPhotoMarkers(map: MapLibreMap, context: Context, photos: List<
 
         val primaryTags = cluster.map { extractPhotoTags(it.note).firstOrNull() }
         val markerColor = if (isCluster) {
-            photoMarkerColorArgb(primaryTags)
+            photoMarkerColorArgb(primaryTags, colorForTag)
         } else {
-            photoPinColorArgb(cluster.first().note)
+            photoPinColorArgb(cluster.first().note, colorForTag)
         }
         val iconBitmap = if (!isCluster) {
             createDotBitmap(markerColor, 36)

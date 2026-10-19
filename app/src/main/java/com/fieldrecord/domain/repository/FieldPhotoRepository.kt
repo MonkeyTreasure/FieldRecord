@@ -12,5 +12,6 @@ interface FieldPhotoRepository {
     suspend fun syncPhotos(files: List<File>, context: Context)
     suspend fun updatePhotoNote(photoId: Long, note: String?)
     suspend fun insertPhoto(photo: FieldPhoto): Long
+    suspend fun findByMetadata(lat: Double, lon: Double, timestamp: Long): FieldPhoto?
     suspend fun deletePhoto(photo: FieldPhoto)
 }

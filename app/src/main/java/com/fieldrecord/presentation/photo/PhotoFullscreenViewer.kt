@@ -1,5 +1,6 @@
 package com.fieldrecord.presentation.photo
 
+import android.content.ClipData
 import android.content.Intent
 import androidx.core.content.FileProvider
 import androidx.compose.foundation.Image
@@ -38,18 +39,20 @@ import androidx.compose.ui.zIndex
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
 import coil.size.Size
+import com.fieldrecord.data.local.PhotoTagColorStore
 import com.fieldrecord.domain.model.FieldPhoto
+import com.fieldrecord.presentation.camera.PhotoFileManager
 import com.fieldrecord.domain.model.extractPhotoTags
 import com.fieldrecord.domain.model.photoTagSuggestions
 import com.fieldrecord.domain.model.applyPhotoTagSuggestion
-import com.fieldrecord.domain.model.photoTagColorArgb
+import com.fieldrecord.presentation.tag.PhotoTagColorPaletteDialog
 import com.fieldrecord.presentation.PhotoNoteText
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Locale
 import kotlinx.coroutines.launch
 
-private val Emerald = Color(0xFF2E7D32)
+private val Emerald = Color(0xFF673AB7)
 
 /**
  * Shared fullscreen photo viewer. Input order must be chronological (oldest first).
@@ -83,7 +86,13 @@ fun PhotoFullscreenViewer(
     var noteDraft by remember(photo.id) { mutableStateOf(photo.note.orEmpty()) }
     var noteSaveError by remember(photo.id) { mutableStateOf<String?>(null) }
     var isSavingNote by remember(photo.id) { mutableStateOf(false) }
+    var showShareDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    val tagColorStore = remember(context) { PhotoTagColorStore(context) }
+    var colorPickerTag by remember(photo.id) { mutableStateOf<String?>(null) }
+    val paletteRevision by PhotoTagColorStore.paletteRevision.collectAsState()
+    val draftTags = remember(noteDraft) { extractPhotoTags(noteDraft).toList().sorted() }
+    draftTags.forEach { tagColorStore.colorFor(it) }
     val imageRequest = remember(photo.filePath) {
         ImageRequest.Builder(context).data(File(photo.filePath)).size(Size.ORIGINAL).build()
     }
@@ -124,7 +133,7 @@ fun PhotoFullscreenViewer(
         Column(Modifier.fillMaxSize()) {
             PhotoMetadataHeader(
                 photo, currentIndex, photos.size,
-                onShare = { sharePhoto(context, photo) },
+                onShareClick = { showShareDialog = true },
                 onClose = onDismiss
             )
 
@@ -200,34 +209,49 @@ fun PhotoFullscreenViewer(
                     modifier = Modifier.fillMaxWidth(0.9f),
                     shape = RoundedCornerShape(12.dp),
                     elevation = 8.dp,
-                    backgroundColor = Color.White
+                    backgroundColor = Color(0xFF673AB7)
                 ) {
                     Column(Modifier.padding(16.dp)) {
                         Text(
                             "Catatan Foto",
                             fontWeight = FontWeight.Bold,
                             fontSize = 18.sp,
-                            color = Color(0xFF202020)
+                            color = Color.White
                         )
                         Spacer(Modifier.height(12.dp))
                         OutlinedTextField(
                             value = noteDraft,
                             onValueChange = { noteDraft = it },
                             modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp),
-                            placeholder = { Text("Tulis catatan untuk foto ini...") },
+                            placeholder = { Text("Tulis catatan untuk foto ini...", color = Color.White.copy(alpha = 0.7f)) },
                             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                             colors = TextFieldDefaults.outlinedTextFieldColors(
-                                textColor = Color(0xFF202020),
-                                focusedBorderColor = Emerald,
-                                unfocusedBorderColor = Color(0xFFCCCCCC),
-                                cursorColor = Emerald
+                                textColor = Color.White,
+                                focusedBorderColor = Color.White,
+                                unfocusedBorderColor = Color.White.copy(alpha = 0.7f),
+                                cursorColor = Color.White
                             )
                         )
+                        if (draftTags.isNotEmpty()) {
+                            Text("Warna tag", color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))
+                            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                                draftTags.forEach { tag ->
+                                    val tagColor = Color(tagColorStore.colorFor(tag))
+                                    TextButton(onClick = { colorPickerTag = tag }) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Box(Modifier.size(16.dp).background(tagColor, CircleShape))
+                                            Spacer(Modifier.width(6.dp))
+                                            Text("#$tag", color = Color.White)
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         if (tagSuggestions.isNotEmpty()) {
                             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
                                 tagSuggestions.forEach { tag ->
                                     TextButton(onClick = { noteDraft = applyPhotoTagSuggestion(noteDraft, tag) }) {
-                                        Text("#$tag", color = Color(photoTagColorArgb(tag)))
+                                        Text("#$tag", color = Color.White)
                                     }
                                 }
                             }
@@ -246,7 +270,7 @@ fun PhotoFullscreenViewer(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             TextButton(onClick = { showNoteEditor = false }) {
-                                Text("BATAL", color = Color.Gray, fontWeight = FontWeight.Bold)
+                                Text("BATAL", color = Color.White, fontWeight = FontWeight.Bold)
                             }
                             Spacer(Modifier.width(8.dp))
                             Button(
@@ -257,6 +281,7 @@ fun PhotoFullscreenViewer(
                                         isSavingNote = true
                                         noteSaveError = null
                                         val normalized = noteDraft.trim().takeIf { it.isNotEmpty() }
+                                        tagColorStore.ensureTags(extractPhotoTags(normalized))
                                         try {
                                             onSaveNote(photo.id, normalized)
                                             displayedNote = normalized
@@ -280,6 +305,28 @@ fun PhotoFullscreenViewer(
                 }
             }
         }
+
+        colorPickerTag?.let { tag ->
+            PhotoTagColorPaletteDialog(
+                tag = tag,
+                colors = remember(tag, paletteRevision) { tagColorStore.availableColors() },
+                onColorSelected = { color ->
+                    if (tagColorStore.assign(tag, color)) colorPickerTag = null
+                },
+                onDismiss = { colorPickerTag = null }
+            )
+        }
+
+        // Share options dialog
+        ShareOptionsDialog(
+            context = context,
+            visible = showShareDialog,
+            onDismiss = { showShareDialog = false },
+            onShare = { mode ->
+                showShareDialog = false
+                sharePhoto(context, photo, mode)
+            }
+        )
     }
 }
 
@@ -316,7 +363,7 @@ private fun PhotoMetadataHeader(
     photo: FieldPhoto,
     currentIndex: Int,
     total: Int,
-    onShare: () -> Unit,
+    onShareClick: () -> Unit,
     onClose: () -> Unit
 ) {
     val hasGps = photo.latitude != 0.0 || photo.longitude != 0.0
@@ -348,6 +395,16 @@ private fun PhotoMetadataHeader(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+            PhotoFileManager.photographerStampFromFilename(photo.fileName)?.let { photographer ->
+                Text("Diambil oleh: $photographer", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+            }
+            Text(
+                "Penyimpanan: ${photo.filePath}",
+                color = Color.White.copy(alpha = 0.65f),
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
         Text(
             "${currentIndex + 1}/$total",
@@ -358,8 +415,8 @@ private fun PhotoMetadataHeader(
                 .background(Color.White.copy(alpha = 0.18f))
                 .padding(horizontal = 10.dp, vertical = 4.dp)
         )
-        IconButton(onClick = onShare) {
-            Icon(Icons.Default.Share, contentDescription = "Bagikan foto via WhatsApp", tint = Color.White)
+        IconButton(onClick = onShareClick) {
+            Icon(Icons.Default.Share, contentDescription = "Bagikan", tint = Color.White)
         }
         IconButton(onClick = onClose) {
             Icon(Icons.Default.Close, contentDescription = "Tutup preview", tint = Color.White)
@@ -367,29 +424,87 @@ private fun PhotoMetadataHeader(
     }
 }
 
-private fun sharePhoto(context: android.content.Context, photo: FieldPhoto) {
-    val file = File(photo.filePath)
-    if (!file.isFile) {
-        android.widget.Toast.makeText(context, "File foto tidak ditemukan", android.widget.Toast.LENGTH_SHORT).show()
-        return
+@Composable
+fun ShareOptionsDialog(
+    context: android.content.Context,
+    visible: Boolean,
+    onDismiss: () -> Unit,
+    onShare: (Int) -> Unit
+) {
+    val dialogRef = remember { mutableStateOf<android.app.AlertDialog?>(null) }
+    DisposableEffect(visible) {
+        if (visible) {
+            val dialog = android.app.AlertDialog.Builder(context)
+                .setTitle("Pilih Opsi Berbagi")
+                .setItems(arrayOf("Share Foto & Note Saja", "Share Data dengan .field")) { _, which ->
+                    onShare(which)
+                }
+                .setOnCancelListener { onDismiss() }
+                .create()
+            dialog.setCanceledOnTouchOutside(true)
+            dialog.show()
+            dialogRef.value = dialog
+        } else {
+            dialogRef.value?.dismiss()
+            dialogRef.value = null
+        }
+        onDispose {
+            dialogRef.value?.dismiss()
+            dialogRef.value = null
+        }
+    }
+}
+
+private fun sharePhoto(context: android.content.Context, photo: FieldPhoto, mode: Int) {
+    val sendIntent = Intent(Intent.ACTION_SEND).apply {
+        if (mode == 0) {
+            // Share Foto + Note Saja
+            type = "image/jpeg"
+            val photoFile = File(photo.filePath)
+            if (photoFile.isFile) {
+                val photoUri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", photoFile)
+                putExtra(Intent.EXTRA_STREAM, photoUri)
+                val photographer = PhotoFileManager.photographerStampFromFilename(photo.fileName)
+                putExtra(
+                    Intent.EXTRA_TEXT,
+                    buildString {
+                        append("Nama foto: ${photo.fileName}\n")
+                        if (!photographer.isNullOrBlank()) append("Diambil oleh: $photographer\n")
+                        append("Catatan: ${photo.note ?: "-"}\nLokasi: ${photo.latitude}, ${photo.longitude}")
+                    }
+                )
+            }
+        } else {
+            // Share Data dengan .field (foto + metadata pengambil, nama, lokasi, dan catatan)
+            type = "application/octet-stream"
+            val photoFile = File(photo.filePath)
+            val base64Photo = if (photoFile.exists()) {
+                android.util.Base64.encodeToString(photoFile.readBytes(), android.util.Base64.NO_WRAP)
+            } else ""
+
+            val photographer = PhotoFileManager.photographerStampFromFilename(photo.fileName).orEmpty()
+            val shareData = buildString {
+                append("PhotoName=${photo.fileName}\n")
+                append("Photographer=$photographer\n")
+                append("PhotoStorage=FieldRecord/Photo/${photo.fileName}\n")
+                append("Lat=${photo.latitude}\n")
+                append("Lon=${photo.longitude}\n")
+                append("Timestamp=${photo.timestamp}\n")
+                append("Note=${photo.note ?: ""}\n")
+                append("PhotoBase64=$base64Photo")
+            }
+            val file = File(context.cacheDir, "visit_${photo.id}.field")
+            file.writeText(shareData)
+            val fileUri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            putExtra(Intent.EXTRA_STREAM, fileUri)
+            clipData = ClipData.newUri(context.contentResolver, file.name, fileUri)
+        }
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     runCatching {
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-        val sendIntent = Intent(Intent.ACTION_SEND).apply {
-            type = "image/jpeg"
-            putExtra(Intent.EXTRA_STREAM, uri)
-            val shareText = buildString {
-                append("Koordinat: ${photo.latitude}, ${photo.longitude}")
-                if (!photo.note.isNullOrBlank()) {
-                    append("\n\n").append(photo.note)
-                }
-            }
-            putExtra(Intent.EXTRA_TEXT, shareText)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        context.startActivity(Intent.createChooser(sendIntent, "Bagikan foto"))
+        context.startActivity(Intent.createChooser(sendIntent, "Bagikan data"))
     }.onFailure {
-        android.widget.Toast.makeText(context, "Tidak dapat membagikan foto: ${it.message}", android.widget.Toast.LENGTH_LONG).show()
+        android.widget.Toast.makeText(context, "Tidak dapat membagikan: ${it.message}", android.widget.Toast.LENGTH_LONG).show()
     }
 }
 

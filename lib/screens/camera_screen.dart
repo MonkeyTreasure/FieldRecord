@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:sensors_plus/sensors_plus.dart';
@@ -132,6 +133,8 @@ class _FieldCameraScreenState extends State<FieldCameraScreen> {
   bool _isInitialized = false;
   bool _isTakingPicture = false;
   StreamSubscription<AccelerometerEvent>? _accelerometerSubscription;
+  StreamSubscription<MagnetometerEvent>? _magnetometerSubscription;
+  double _heading = 0.0;
   String _orientationLabel = 'Portrait';
 
   double _zoomLevel = 1.0;
@@ -146,8 +149,18 @@ class _FieldCameraScreenState extends State<FieldCameraScreen> {
     super.initState();
     _initCamera();
     _initOrientationListener();
+    _initCompassListener();
     // Load any existing photos from the app's internal folder and set the series counter
     AppGalleryData.rescanFolder();
+  }
+
+  void _initCompassListener() {
+    _magnetometerSubscription = magnetometerEvents.listen((event) {
+      if (!mounted) return;
+      double heading = math.atan2(event.y, event.x) * (180 / math.pi);
+      heading = (heading + 360) % 360;
+      setState(() => _heading = heading);
+    });
   }
 
   bool _isUltraWideSupported = false;
@@ -188,6 +201,7 @@ class _FieldCameraScreenState extends State<FieldCameraScreen> {
   @override
   void dispose() {
     _accelerometerSubscription?.cancel();
+    _magnetometerSubscription?.cancel();
     _controller?.dispose();
     super.dispose();
   }
@@ -364,7 +378,7 @@ class _FieldCameraScreenState extends State<FieldCameraScreen> {
                           ),
                         ),
 
-                        // GPS MOCKUP
+                        // GPS & COMPASS MOCKUP
                         Positioned(
                           bottom: isLandscapeOrientation ? null : 55,
                           left: 12,
@@ -374,12 +388,12 @@ class _FieldCameraScreenState extends State<FieldCameraScreen> {
                                   quarterTurns: 1,
                                   child: SizedBox(
                                     width: boxHeight - 24,
-                                    child: _buildGpsCard(),
+                                    child: _buildGpsAndCompassCard(),
                                   ),
                                 )
                               : SizedBox(
                                   width: boxWidth - 24,
-                                  child: _buildGpsCard(),
+                                  child: _buildGpsAndCompassCard(),
                                 ),
                         ),
 
@@ -480,7 +494,7 @@ class _FieldCameraScreenState extends State<FieldCameraScreen> {
                                   debugPrint("Rotation error: $e");
                                 }
                               }
-                              await AppGalleryData.savePhotoToAppDir(File(finalPath), _searchLocationName, 'Lat: ${_mockLat.toStringAsFixed(5)}, Lng: ${_mockLng.toStringAsFixed(5)}', '291°', _orientationLabel);
+                              await AppGalleryData.savePhotoToAppDir(File(finalPath), _searchLocationName, 'Lat: ${_mockLat.toStringAsFixed(5)}, Lng: ${_mockLng.toStringAsFixed(5)}', '${_heading.toStringAsFixed(0)}°', _orientationLabel);
                               setState(() => _isTakingPicture = false);
                             } catch (e) {
                               setState(() => _isTakingPicture = false);
@@ -556,7 +570,26 @@ class _FieldCameraScreenState extends State<FieldCameraScreen> {
     );
   }
 
-  Widget _buildGpsCard() {
+  Widget _buildGpsAndCompassCard() {
+    String directionStr = '';
+    if (_heading >= 337.5 || _heading < 22.5) {
+      directionStr = 'Utara (0°/360°)';
+    } else if (_heading >= 22.5 && _heading < 67.5) {
+      directionStr = 'Timur Laut (45°)';
+    } else if (_heading >= 67.5 && _heading < 112.5) {
+      directionStr = 'Timur (90°)';
+    } else if (_heading >= 112.5 && _heading < 157.5) {
+      directionStr = 'Tenggara (135°)';
+    } else if (_heading >= 157.5 && _heading < 202.5) {
+      directionStr = 'Selatan (180°)';
+    } else if (_heading >= 202.5 && _heading < 247.5) {
+      directionStr = 'Barat Daya (225°)';
+    } else if (_heading >= 247.5 && _heading < 292.5) {
+      directionStr = 'Barat (270°)';
+    } else {
+      directionStr = 'Barat Laut (315°)';
+    }
+
     return GestureDetector(
       onTap: _showLocationSearchDialog,
       child: Container(
@@ -566,44 +599,48 @@ class _FieldCameraScreenState extends State<FieldCameraScreen> {
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: Colors.greenAccent, width: 0.8),
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      const Text('📍 ', style: TextStyle(fontSize: 11)),
-                      Expanded(
-                        child: Text(
-                          _searchLocationName,
-                          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                        decoration: BoxDecoration(
-                          color: Colors.green.withOpacity(0.3),
-                          borderRadius: BorderRadius.circular(3),
-                        ),
-                        child: Text(_orientationLabel, style: const TextStyle(color: Colors.greenAccent, fontSize: 8)),
-                      ),
-                    ],
+            // Baris 1: GPS
+            Row(
+              children: [
+                const Text('📍 ', style: TextStyle(fontSize: 11)),
+                Expanded(
+                  child: Text(
+                    '$_searchLocationName | Lat: ${_mockLat.toStringAsFixed(5)}, Lng: ${_mockLng.toStringAsFixed(5)}',
+                    style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Lat: ${_mockLat.toStringAsFixed(5)}, Lng: ${_mockLng.toStringAsFixed(5)}',
-                    style: const TextStyle(color: Colors.greenAccent, fontSize: 9),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withOpacity(0.3),
+                    borderRadius: BorderRadius.circular(3),
                   ),
-                ],
-              ),
+                  child: Text(_orientationLabel, style: const TextStyle(color: Colors.greenAccent, fontSize: 8)),
+                ),
+              ],
             ),
-            const SizedBox(width: 6),
-            const Icon(Icons.search, color: Colors.amber, size: 16),
+            const SizedBox(height: 3),
+            const Divider(color: Colors.white24, height: 1, thickness: 0.5),
+            const SizedBox(height: 3),
+            // Baris 2: Kompas
+            Row(
+              children: [
+                const Text('🧭 ', style: TextStyle(fontSize: 11)),
+                Expanded(
+                  child: Text(
+                    'Kompas: ${_heading.toStringAsFixed(1)}° ($directionStr)',
+                    style: const TextStyle(color: Colors.greenAccent, fontSize: 10, fontWeight: FontWeight.w500),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const Icon(Icons.search, color: Colors.amber, size: 14),
+              ],
+            ),
           ],
         ),
       ),
