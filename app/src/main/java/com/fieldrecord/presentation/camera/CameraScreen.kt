@@ -194,7 +194,6 @@ fun CameraScreen(
     var isRecording by remember { mutableStateOf(false) }
     var recordingStartedAt by remember { mutableStateOf<Long?>(null) }
     var recordingDurationSeconds by remember { mutableIntStateOf(0) }
-    var lastRecordedDurationSeconds by remember { mutableIntStateOf(0) }
     var previewUseCase by remember { mutableStateOf<Preview?>(null) }
     var camera by remember { mutableStateOf<Camera?>(null) }
     var cameraProviderRef by remember { mutableStateOf<ProcessCameraProvider?>(null) }
@@ -251,7 +250,7 @@ fun CameraScreen(
     var horizonRoll by remember { mutableFloatStateOf(0f) }
     var horizonPitch by remember { mutableFloatStateOf(0f) }
 
-    SideEffect {
+    val buildVideoWatermarkFrame: () -> VideoWatermarkFrame = {
         val currentLocation = gpsLocation?.takeIf { System.currentTimeMillis() - it.time <= 120_000L }
         val bearing = when {
             compassDegrees.isFinite() -> compassDegrees
@@ -263,24 +262,29 @@ fun CameraScreen(
         }.getOrElse {
             SimpleDateFormat("dd.MM.yyyy, HH:mm", Locale.US).format(Date())
         }
-        val lines = formatVideoWatermarkLines(
-            unitId = unitId,
-            dateText = dateText,
-            latitude = currentLocation?.latitude,
-            longitude = currentLocation?.longitude,
-            bearingDegrees = bearing,
-            elapsedSeconds = recordingDurationSeconds
+        VideoWatermarkFrame(
+            lines = formatVideoWatermarkLines(
+                unitId = unitId,
+                dateText = dateText,
+                latitude = currentLocation?.latitude,
+                longitude = currentLocation?.longitude,
+                bearingDegrees = bearing
+            ),
+            textColor = runCatching { AndroidColor.parseColor(watermarkTextColor) }.getOrDefault(AndroidColor.BLUE),
+            backgroundColor = runCatching { AndroidColor.parseColor(watermarkBackgroundColor) }.getOrDefault(AndroidColor.WHITE),
+            transparentBackground = watermarkBackgroundTransparent,
+            backgroundAlpha = (watermarkBackgroundAlpha.coerceIn(0f, 1f) * 255f).toInt()
         )
-        val frame = if (isRecording) {
-            VideoWatermarkFrame(
-                lines = lines,
-                textColor = runCatching { AndroidColor.parseColor(watermarkTextColor) }.getOrDefault(AndroidColor.BLUE),
-                backgroundColor = runCatching { AndroidColor.parseColor(watermarkBackgroundColor) }.getOrDefault(AndroidColor.WHITE),
-                transparentBackground = watermarkBackgroundTransparent,
-                backgroundAlpha = (watermarkBackgroundAlpha.coerceIn(0f, 1f) * 255f).toInt()
-            )
-        } else null
-        videoWatermarkSnapshot.set(frame)
+    }
+
+    SideEffect {
+        videoWatermarkSnapshot.set(
+            if (shouldRenderVideoWatermark(isStartingVideo, isRecording)) {
+                buildVideoWatermarkFrame()
+            } else {
+                null
+            }
+        )
     }
 
     LaunchedEffect(context) {
@@ -467,11 +471,14 @@ fun CameraScreen(
             android.widget.Toast.makeText(context, "Kamera video belum siap", android.widget.Toast.LENGTH_SHORT).show()
         } else {
             isStartingVideo = true
+            recordingDurationSeconds = 0
+            videoWatermarkSnapshot.set(buildVideoWatermarkFrame())
             captureScope.launch {
                 val outputFile = withContext(Dispatchers.IO) {
                     runCatching { PhotoFileManager.getOutputVideoFile() }.getOrNull()
                 }
                 if (outputFile == null) {
+                    videoWatermarkSnapshot.set(null)
                     isStartingVideo = false
                     android.widget.Toast.makeText(context, "Folder video tidak dapat dibuat", android.widget.Toast.LENGTH_LONG).show()
                 } else {
@@ -486,23 +493,18 @@ fun CameraScreen(
                                 is VideoRecordEvent.Start -> {
                                     recordingStartedAt = SystemClock.elapsedRealtime()
                                     recordingDurationSeconds = 0
-                                    lastRecordedDurationSeconds = 0
+                                    videoWatermarkSnapshot.set(buildVideoWatermarkFrame())
                                     isRecording = true
                                 }
                                 is VideoRecordEvent.Finalize -> {
-                                    val finalizedDurationSeconds = (
-                                        (event.recordingStats.recordedDurationNanos + 500_000_000L) / 1_000_000_000L
-                                    ).toInt().coerceAtLeast(recordingDurationSeconds)
                                     activeRecording = null
                                     isStartingVideo = false
                                     isRecording = false
                                     recordingStartedAt = null
                                     recordingDurationSeconds = 0
                                     if (event.error == VideoRecordEvent.Finalize.ERROR_NONE && outputFile.exists() && outputFile.length() > 0L) {
-                                        lastRecordedDurationSeconds = finalizedDurationSeconds
                                         latestVideoFile = outputFile
                                         isLatestMediaVideo = true
-                                        android.widget.Toast.makeText(context, "Video tersimpan: ${outputFile.name}", android.widget.Toast.LENGTH_LONG).show()
                                     } else {
                                         outputFile.delete()
                                         android.widget.Toast.makeText(context, "Perekaman video gagal (${event.error})", android.widget.Toast.LENGTH_LONG).show()
@@ -513,6 +515,7 @@ fun CameraScreen(
                         isStartingVideo = false
                         isRecording = true
                     } catch (error: Exception) {
+                        videoWatermarkSnapshot.set(null)
                         outputFile.delete()
                         activeRecording = null
                         isStartingVideo = false
@@ -885,13 +888,12 @@ fun CameraScreen(
                 }
             }
         }
-        if (isVideoMode && (isStartingVideo || isRecording || lastRecordedDurationSeconds > 0)) {
-            val recordingActive = isStartingVideo || isRecording
-            val durationLabel = if (recordingActive) {
-                formatRecordingDuration(recordingDurationSeconds)
-            } else {
-                formatRecordedDuration(lastRecordedDurationSeconds)
-            }
+        val durationLabel = recordingTimerLabel(
+            isStartingVideo = isStartingVideo,
+            isRecording = isRecording,
+            elapsedSeconds = recordingDurationSeconds
+        )
+        if (isVideoMode && durationLabel != null) {
             Row(
                 modifier = Modifier.align(Alignment.TopCenter)
                     .padding(top = 64.dp)
@@ -901,12 +903,7 @@ fun CameraScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(9.dp)
             ) {
-                Box(
-                    Modifier.size(11.dp).background(
-                        if (recordingActive) Color.Red else Color(0xFF4CAF50),
-                        CircleShape
-                    )
-                )
+                Box(Modifier.size(11.dp).background(Color.Red, CircleShape))
                 Text(
                     durationLabel,
                     color = Color.White,

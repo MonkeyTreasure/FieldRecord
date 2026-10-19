@@ -17,6 +17,8 @@ import androidx.compose.material.IconButton
 import androidx.compose.material.Text
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -29,12 +31,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.content.FileProvider
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -42,6 +49,26 @@ import kotlinx.coroutines.withContext
 @Composable
 internal fun VideoPlayerDialog(file: File, onDismiss: () -> Unit) {
     val context = LocalContext.current
+    var isFullscreen by remember(file.absolutePath) { mutableStateOf(false) }
+    val dialogWindow = (LocalView.current.parent as? DialogWindowProvider)?.window
+    DisposableEffect(dialogWindow, isFullscreen) {
+        val window = dialogWindow
+        if (window == null) {
+            onDispose { }
+        } else {
+            val controller = WindowInsetsControllerCompat(window, window.decorView)
+            val systemBars = WindowInsetsCompat.Type.systemBars()
+            val wereSystemBarsVisible = ViewCompat.getRootWindowInsets(window.decorView)
+                ?.isVisible(systemBars) ?: true
+            if (isFullscreen) {
+                controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                controller.hide(systemBars)
+            }
+            onDispose {
+                if (isFullscreen && wereSystemBarsVisible) controller.show(systemBars)
+            }
+        }
+    }
     var playbackError by remember(file.absolutePath) { mutableStateOf<String?>(null) }
     val videoUri: Uri? = remember(file.absolutePath) {
         runCatching {
@@ -59,7 +86,10 @@ internal fun VideoPlayerDialog(file: File, onDismiss: () -> Unit) {
 
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = !isFullscreen
+        )
     ) {
         val density = LocalDensity.current
         val backgroundInteraction = remember { MutableInteractionSource() }
@@ -120,6 +150,16 @@ internal fun VideoPlayerDialog(file: File, onDismiss: () -> Unit) {
                 modifier = Modifier.align(Alignment.TopStart).padding(8.dp)
             ) {
                 Icon(Icons.Default.Close, contentDescription = "Tutup pemutar video", tint = Color.White)
+            }
+            IconButton(
+                onClick = { isFullscreen = !isFullscreen },
+                modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)
+            ) {
+                Icon(
+                    imageVector = if (isFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                    contentDescription = if (isFullscreen) "Keluar dari layar penuh" else "Layar penuh",
+                    tint = Color.White
+                )
             }
 
             playbackError?.let { message ->

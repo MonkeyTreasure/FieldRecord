@@ -54,7 +54,7 @@ internal fun GalleryVideoTile(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .aspectRatio(1f)
+            .aspectRatio(3f / 4f)
             .clip(RoundedCornerShape(4.dp))
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         elevation = 2.dp

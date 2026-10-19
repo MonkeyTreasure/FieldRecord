@@ -42,7 +42,7 @@ internal class VideoWatermarkRenderer {
         textPaint.textSize = textSize
         textPaint.isAntiAlias = true
         textPaint.alpha = 255
-        val lines = listOf(frame.lines.unitId, frame.lines.date, frame.lines.location, frame.lines.duration)
+        val lines = listOf(frame.lines.unitId, frame.lines.date, frame.lines.location)
         val x = logicalWidth * 0.03f
         val firstBaseline = barTop + textSize * 0.95f
         val lineSpacing = textSize * 1.1f

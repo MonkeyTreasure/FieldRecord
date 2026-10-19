@@ -5,8 +5,7 @@ import java.util.Locale
 internal data class VideoWatermarkLines(
     val unitId: String,
     val date: String,
-    val location: String,
-    val duration: String
+    val location: String
 )
 
 internal fun formatRecordingDuration(elapsedSeconds: Int): String {
@@ -18,18 +17,25 @@ internal fun formatRecordingDuration(elapsedSeconds: Int): String {
     }
 }
 
-internal fun formatRecordedDuration(elapsedSeconds: Int): String {
-    val duration = formatRecordingDuration(elapsedSeconds).removePrefix("REC ")
-    return "RECORDED $duration"
+internal fun recordingTimerLabel(
+    isStartingVideo: Boolean,
+    isRecording: Boolean,
+    elapsedSeconds: Int
+): String? = when {
+    isStartingVideo -> formatRecordingDuration(0)
+    isRecording -> formatRecordingDuration(elapsedSeconds)
+    else -> null
 }
+
+internal fun shouldRenderVideoWatermark(isStartingVideo: Boolean, isRecording: Boolean): Boolean =
+    isStartingVideo || isRecording
 
 internal fun formatVideoWatermarkLines(
     unitId: String,
     dateText: String,
     latitude: Double?,
     longitude: Double?,
-    bearingDegrees: Float,
-    elapsedSeconds: Int
+    bearingDegrees: Float
 ): VideoWatermarkLines {
     val hasCoordinates = latitude != null && longitude != null &&
         latitude.isFinite() && longitude.isFinite() &&
@@ -48,11 +54,9 @@ internal fun formatVideoWatermarkLines(
             coordinates
         }
     }
-    val duration = formatRecordingDuration(elapsedSeconds)
     return VideoWatermarkLines(
         unitId = unitId.ifBlank { "SBYE" },
         date = dateText,
-        location = location,
-        duration = duration
+        location = location
     )
 }
