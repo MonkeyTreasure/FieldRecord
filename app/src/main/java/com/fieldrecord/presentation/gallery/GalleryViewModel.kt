@@ -9,6 +9,7 @@ import com.fieldrecord.domain.model.FieldPhoto
 import com.fieldrecord.domain.export.PhotoNotesCsvExporter
 import com.fieldrecord.domain.repository.FieldPhotoRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -26,6 +27,8 @@ class GalleryViewModel @Inject constructor(
 
     private val _currentMonth = MutableStateFlow(Calendar.getInstance())
     val currentMonth: StateFlow<Calendar> = _currentMonth
+    private val _videos = MutableStateFlow<List<GalleryVideoItem>>(emptyList())
+    internal val videos: StateFlow<List<GalleryVideoItem>> = _videos
 
     val pager = _currentMonth.flatMapLatest { calendar ->
         Pager(PagingConfig(pageSize = 20)) {
@@ -51,6 +54,18 @@ class GalleryViewModel @Inject constructor(
             if (files.isNotEmpty()) {
                 repository.syncPhotos(files, context)
             }
+        }
+    }
+
+    fun syncVideosFromStorage() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val videos = runCatching {
+                com.fieldrecord.presentation.camera.PhotoFileManager.findVideos()
+                    .filter { it.isFile && it.length() > 0L }
+                    .map { GalleryVideoItem(it.absolutePath, it.name, it.lastModified()) }
+                    .sortedByDescending { it.timestamp }
+            }.getOrDefault(emptyList())
+            _videos.value = videos
         }
     }
 

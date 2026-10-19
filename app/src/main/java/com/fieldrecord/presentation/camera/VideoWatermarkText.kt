@@ -9,6 +9,15 @@ internal data class VideoWatermarkLines(
     val duration: String
 )
 
+internal fun formatRecordingDuration(elapsedSeconds: Int): String {
+    val seconds = elapsedSeconds.coerceAtLeast(0)
+    return if (seconds >= 3_600) {
+        "REC %02d:%02d:%02d".format(Locale.US, seconds / 3_600, (seconds / 60) % 60, seconds % 60)
+    } else {
+        "REC %02d:%02d".format(Locale.US, seconds / 60, seconds % 60)
+    }
+}
+
 internal fun formatVideoWatermarkLines(
     unitId: String,
     dateText: String,
@@ -34,12 +43,7 @@ internal fun formatVideoWatermarkLines(
             coordinates
         }
     }
-    val seconds = elapsedSeconds.coerceAtLeast(0)
-    val duration = if (seconds >= 3_600) {
-        "REC %02d:%02d:%02d".format(Locale.US, seconds / 3_600, (seconds / 60) % 60, seconds % 60)
-    } else {
-        "REC %02d:%02d".format(Locale.US, seconds / 60, seconds % 60)
-    }
+    val duration = formatRecordingDuration(elapsedSeconds)
     return VideoWatermarkLines(
         unitId = unitId.ifBlank { "SBYE" },
         date = dateText,

@@ -32,6 +32,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.unit.dp
@@ -46,6 +49,7 @@ import com.fieldrecord.domain.model.extractPhotoTags
 import com.fieldrecord.presentation.camera.PhotoFileManager
 import com.fieldrecord.presentation.photo.PhotoFullscreenViewer
 import java.io.File
+import java.util.Calendar
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -53,6 +57,7 @@ fun GalleryScreen(
     viewModel: GalleryViewModel
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val tagColorStore = remember(context) { PhotoTagColorStore(context) }
     val haptics = LocalHapticFeedback.current
     val lazyPagingItems = viewModel.pager.collectAsLazyPagingItems()
@@ -98,10 +103,44 @@ fun GalleryScreen(
         }
     }
     val chronologicalPhotos = remember(loadedPhotos) { loadedPhotos.sortedBy { it.timestamp } }
+    val currentMonth by viewModel.currentMonth.collectAsState()
+    val allVideos by viewModel.videos.collectAsState()
+    val monthRange = remember(currentMonth.timeInMillis) {
+        val start = (currentMonth.clone() as Calendar).apply {
+            set(Calendar.DAY_OF_MONTH, 1)
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val end = (currentMonth.clone() as Calendar).apply {
+            set(Calendar.DAY_OF_MONTH, getActualMaximum(Calendar.DAY_OF_MONTH))
+            set(Calendar.HOUR_OF_DAY, 23)
+            set(Calendar.MINUTE, 59)
+            set(Calendar.SECOND, 59)
+            set(Calendar.MILLISECOND, 999)
+        }
+        start.timeInMillis to end.timeInMillis
+    }
+    val monthVideos = remember(allVideos, monthRange) {
+        videosInDateRange(allVideos, monthRange.first, monthRange.second)
+    }
+    val mediaTimeline = remember(loadedPhotos, monthVideos) {
+        buildGalleryTimeline(loadedPhotos, monthVideos)
+    }
     val selectionMode = selectedIds.isNotEmpty()
 
     LaunchedEffect(Unit) {
         viewModel.syncPhotosFromStorage(context)
+        viewModel.syncVideosFromStorage()
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) viewModel.syncVideosFromStorage()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -180,61 +219,80 @@ fun GalleryScreen(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 modifier = Modifier.weight(1f).fillMaxWidth()
             ) {
-                items(lazyPagingItems.itemCount, key = { index -> lazyPagingItems.peek(index)?.id ?: index }) { index ->
-                val photo = lazyPagingItems[index] ?: return@items
-                val selected = photo.id in selectedIds
-                val firstTag = remember(photo.note) { extractPhotoTags(photo.note).firstOrNull() }
-                val tagColor = if (firstTag == null) null else remember(firstTag) { tagColorStore.colorFor(firstTag) }
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(1f)
-                        .border(
-                        width = if (selected) 3.dp else 0.dp,
-                        color = if (selected) GallerySelectionTheme.borderColor else Color.Transparent,
-                        shape = RoundedCornerShape(4.dp)
-                    )
-                    .combinedClickable(
-                            onClick = {
-                                if (selectionMode) {
-                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    selectedIds = if (selected) selectedIds - photo.id else selectedIds + photo.id
-                                } else {
-                                    fullscreenPhotos = chronologicalPhotos
-                                    fullscreenIndex = chronologicalPhotos.indexOfFirst { it.id == photo.id }.coerceAtLeast(0)
-                                }
-                            },
-                            onLongClick = {
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                selectedIds = if (selected) selectedIds - photo.id else selectedIds + photo.id
-                            }
-                        ),
-                    backgroundColor = if (selected) Color(0xFF673AB7).copy(alpha = 0.7f) else MaterialTheme.colors.surface,
-                    elevation = 2.dp
-                ) {
-                    Box(Modifier.fillMaxSize()) {
-                        androidx.compose.foundation.Image(
-                            painter = rememberAsyncImagePainter(File(photo.filePath)),
-                            contentDescription = photo.fileName,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                        if (firstTag != null && tagColor != null) {
-                            Box(
+                items(mediaTimeline, key = { it.key }) { media ->
+                    when (media) {
+                        is GalleryMediaItem.Photo -> {
+                            val photo = media.photo
+                            val selected = photo.id in selectedIds
+                            val firstTag = remember(photo.note) { extractPhotoTags(photo.note).firstOrNull() }
+                            val tagColor = if (firstTag == null) null else remember(firstTag) { tagColorStore.colorFor(firstTag) }
+                            Card(
                                 modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .padding(4.dp)
-                                    .size(11.dp)
-                                    .clip(RoundedCornerShape(3.dp))
-                                    .background(Color(tagColor), RoundedCornerShape(3.dp))
-                                    .border(0.75.dp, Color.White.copy(alpha = 0.9f), RoundedCornerShape(3.dp))
-                                    .semantics { contentDescription = "Photo tagged #$firstTag" }
+                                    .fillMaxWidth()
+                                    .aspectRatio(1f)
+                                    .border(
+                                        width = if (selected) 3.dp else 0.dp,
+                                        color = if (selected) GallerySelectionTheme.borderColor else Color.Transparent,
+                                        shape = RoundedCornerShape(4.dp)
+                                    )
+                                    .combinedClickable(
+                                        onClick = {
+                                            if (selectionMode) {
+                                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                selectedIds = if (selected) selectedIds - photo.id else selectedIds + photo.id
+                                            } else {
+                                                fullscreenPhotos = chronologicalPhotos
+                                                fullscreenIndex = chronologicalPhotos.indexOfFirst { it.id == photo.id }.coerceAtLeast(0)
+                                            }
+                                        },
+                                        onLongClick = {
+                                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            selectedIds = if (selected) selectedIds - photo.id else selectedIds + photo.id
+                                        }
+                                    ),
+                                backgroundColor = if (selected) Color(0xFF673AB7).copy(alpha = 0.7f) else MaterialTheme.colors.surface,
+                                elevation = 2.dp
+                            ) {
+                                Box(Modifier.fillMaxSize()) {
+                                    androidx.compose.foundation.Image(
+                                        painter = rememberAsyncImagePainter(File(photo.filePath)),
+                                        contentDescription = photo.fileName,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                    if (firstTag != null && tagColor != null) {
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.BottomEnd)
+                                                .padding(4.dp)
+                                                .size(11.dp)
+                                                .clip(RoundedCornerShape(3.dp))
+                                                .background(Color(tagColor), RoundedCornerShape(3.dp))
+                                                .border(0.75.dp, Color.White.copy(alpha = 0.9f), RoundedCornerShape(3.dp))
+                                                .semantics { contentDescription = "Photo tagged #$firstTag" }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        is GalleryMediaItem.Video -> {
+                            GalleryVideoTile(
+                                video = media.video,
+                                onClick = {
+                                    if (selectionMode) {
+                                        Toast.makeText(context, "Pilih foto untuk aksi bagikan atau hapus", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        openGalleryVideo(context, File(media.video.filePath))
+                                    }
+                                },
+                                onLongClick = {
+                                    Toast.makeText(context, "Video dapat diputar dari galeri", Toast.LENGTH_SHORT).show()
+                                }
                             )
                         }
                     }
                 }
             }
-        }
         }
 
         if (showDeleteConfirm) {
@@ -271,6 +329,23 @@ fun GalleryScreen(
                 onDismiss = { fullscreenPhotos = null }
             )
         }
+    }
+}
+
+private fun openGalleryVideo(context: android.content.Context, file: File) {
+    if (!file.isFile || file.length() == 0L) {
+        Toast.makeText(context, "File video tidak tersedia", Toast.LENGTH_SHORT).show()
+        return
+    }
+    try {
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "video/mp4")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(intent, "Putar video"))
+    } catch (error: Exception) {
+        Toast.makeText(context, "Tidak ada pemutar video tersedia: ${error.message ?: "periksa aplikasi pemutar"}", Toast.LENGTH_LONG).show()
     }
 }
 

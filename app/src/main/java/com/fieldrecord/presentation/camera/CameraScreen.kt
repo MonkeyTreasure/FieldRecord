@@ -11,6 +11,7 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.OrientationEventListener
 import android.view.Surface
 import androidx.camera.core.Camera
@@ -398,7 +399,7 @@ fun CameraScreen(
                         false
                     } else {
                         val frameSize = frame.size
-                        videoWatermarkRenderer.draw(frame.overlayCanvas, frameSize.width, frameSize.height, watermark)
+                        videoWatermarkRenderer.draw(frame.overlayCanvas, frameSize.width, frameSize.height, frame.rotationDegrees, watermark)
                         true
                     }
                 }
@@ -473,7 +474,7 @@ fun CameraScreen(
                         activeRecording = pending.start(ContextCompat.getMainExecutor(context)) { event ->
                             when (event) {
                                 is VideoRecordEvent.Start -> {
-                                    recordingStartedAt = System.currentTimeMillis()
+                                    recordingStartedAt = SystemClock.elapsedRealtime()
                                     isRecording = true
                                 }
                                 is VideoRecordEvent.Finalize -> {
@@ -537,7 +538,7 @@ fun CameraScreen(
     LaunchedEffect(recordingStartedAt) {
         val startTime = recordingStartedAt ?: return@LaunchedEffect
         while (true) {
-            recordingDurationSeconds = ((System.currentTimeMillis() - startTime) / 1_000L).toInt()
+            recordingDurationSeconds = ((SystemClock.elapsedRealtime() - startTime) / 1_000L).toInt()
             delay(500L)
         }
     }
@@ -666,7 +667,7 @@ fun CameraScreen(
                 }
             }
             CameraTelemetryOverlay(gpsLocation, compassDegrees, Modifier.fillMaxSize())
-            if (isRecording) {
+            if (isVideoMode && isRecording) {
                 Row(
                     modifier = Modifier.align(Alignment.TopCenter).padding(top = 12.dp)
                         .background(Color.Black.copy(alpha = 0.72f), RoundedCornerShape(18.dp)).padding(horizontal = 14.dp, vertical = 8.dp),
@@ -674,9 +675,7 @@ fun CameraScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Box(Modifier.size(9.dp).background(Color.Red, CircleShape))
-                    val minutes = recordingDurationSeconds / 60
-                    val seconds = recordingDurationSeconds % 60
-                    Text("REC %02d:%02d".format(minutes, seconds), color = Color.White, style = MaterialTheme.typography.caption)
+                    Text(formatRecordingDuration(recordingDurationSeconds), color = Color.White, style = MaterialTheme.typography.caption)
                 }
             }
             // Horizon level overlay
