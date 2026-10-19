@@ -79,9 +79,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -180,6 +183,7 @@ fun CameraScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val configuration = LocalConfiguration.current
+    val density = LocalDensity.current
     val viewfinderLandscape = configuration.screenWidthDp > configuration.screenHeightDp
     val previewView = remember {
         PreviewView(context).apply { implementationMode = PreviewView.ImplementationMode.COMPATIBLE }
@@ -195,6 +199,7 @@ fun CameraScreen(
     var recordingStartedAt by remember { mutableStateOf<Long?>(null) }
     var recordingDurationSeconds by remember { mutableIntStateOf(0) }
     var previewUseCase by remember { mutableStateOf<Preview?>(null) }
+    var viewfinderTopInRootPx by remember { mutableFloatStateOf(0f) }
     var camera by remember { mutableStateOf<Camera?>(null) }
     var cameraProviderRef by remember { mutableStateOf<ProcessCameraProvider?>(null) }
     var zoomState by remember { mutableStateOf<ZoomState?>(null) }
@@ -623,6 +628,9 @@ fun CameraScreen(
                 .clip(RoundedCornerShape(20.dp))
                 .align(Alignment.Center)
                 .offset(y = (-69).dp)
+                .onGloballyPositioned { coordinates ->
+                    viewfinderTopInRootPx = coordinates.positionInRoot().y
+                }
                 .pointerInput(camera) {
                     detectTapGestures { tap ->
                         camera?.let { activeCamera ->
@@ -888,6 +896,9 @@ fun CameraScreen(
                 }
             }
         }
+        val timerTopPadding = with(density) {
+            maxOf(viewfinderTopInRootPx + 12.dp.toPx(), 64.dp.toPx()).toDp()
+        }
         val durationLabel = recordingTimerLabel(
             isStartingVideo = isStartingVideo,
             isRecording = isRecording,
@@ -896,7 +907,7 @@ fun CameraScreen(
         if (isVideoMode && durationLabel != null) {
             Row(
                 modifier = Modifier.align(Alignment.TopCenter)
-                    .padding(top = 64.dp)
+                    .padding(top = timerTopPadding)
                     .zIndex(2f)
                     .background(Color.Black.copy(alpha = 0.88f), RoundedCornerShape(20.dp))
                     .padding(horizontal = 16.dp, vertical = 9.dp),

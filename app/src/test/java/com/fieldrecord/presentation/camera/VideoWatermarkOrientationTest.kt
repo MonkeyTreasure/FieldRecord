@@ -5,6 +5,11 @@ import org.junit.Test
 
 class VideoWatermarkOrientationTest {
     @Test
+    fun videoWatermarkBarUsesSameFourteenPercentHeightAsPhoto() {
+        assertEquals(98f, watermarkBarHeightPx(width = 1200, height = 700), 0.001f)
+    }
+
+    @Test
     fun portraitOutputUsesPortraitLayoutAndRightBufferEdgeForQuarterTurn() {
         val layout = videoWatermarkLayout(bufferWidth = 1920, bufferHeight = 1080, rotationDegrees = 90)
 

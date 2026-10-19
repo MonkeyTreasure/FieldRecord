@@ -31,20 +31,20 @@ internal class VideoWatermarkRenderer {
 
         val logicalWidth = layout.logicalWidth
         val logicalHeight = layout.logicalHeight
-        val barHeight = (minOf(logicalWidth, logicalHeight) * 0.18f).coerceAtLeast(1f)
+        val barHeight = watermarkBarHeightPx(logicalWidth, logicalHeight)
         val barTop = logicalHeight - barHeight
         backgroundPaint.color = frame.backgroundColor
         backgroundPaint.alpha = if (frame.transparentBackground) frame.backgroundAlpha.coerceIn(0, 255) else 255
         canvas.drawRect(0f, barTop, logicalWidth.toFloat(), logicalHeight.toFloat(), backgroundPaint)
 
-        val textSize = barHeight * 0.20f
+        val textSize = barHeight * 0.25f
         textPaint.color = frame.textColor
         textPaint.textSize = textSize
         textPaint.isAntiAlias = true
         textPaint.alpha = 255
         val lines = listOf(frame.lines.unitId, frame.lines.date, frame.lines.location)
         val x = logicalWidth * 0.03f
-        val firstBaseline = barTop + textSize * 0.95f
+        val firstBaseline = barTop + textSize * 1.05f
         val lineSpacing = textSize * 1.1f
         lines.forEachIndexed { index, line ->
             canvas.drawText(line, x, firstBaseline + lineSpacing * index, textPaint)

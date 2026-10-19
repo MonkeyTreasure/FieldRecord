@@ -250,7 +250,7 @@ object PhotoFileManager {
             } else null
             // Use the landscape image's height (the shorter edge) as the shared watermark-bar basis.
             // This keeps the same bar thickness for portrait and landscape captures.
-            val barHeight = (minOf(original.width, original.height) * 0.14f).toInt().coerceAtLeast(1)
+            val barHeight = watermarkBarHeightPx(original.width, original.height).toInt().coerceAtLeast(1)
             // Keep the original photo dimensions; overlay watermark bar inside the bottom of the image.
             val watermarked = Bitmap.createBitmap(original.width, original.height, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(watermarked)

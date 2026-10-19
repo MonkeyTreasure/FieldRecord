@@ -1,5 +1,8 @@
 package com.fieldrecord.presentation.camera
 
+internal fun watermarkBarHeightPx(width: Int, height: Int): Float =
+    (minOf(width, height) * 0.14f).coerceAtLeast(1f)
+
 internal enum class WatermarkBufferEdge { BOTTOM, RIGHT, TOP, LEFT }
 
 internal data class VideoWatermarkLayout(
