@@ -675,28 +675,6 @@ fun CameraScreen(
                 }
             }
             CameraTelemetryOverlay(gpsLocation, compassDegrees, Modifier.fillMaxSize())
-            if (isVideoMode && (isRecording || lastRecordedDurationSeconds > 0)) {
-                val durationLabel = if (isRecording) {
-                    formatRecordingDuration(recordingDurationSeconds)
-                } else {
-                    formatRecordedDuration(lastRecordedDurationSeconds)
-                }
-                Row(
-                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 12.dp)
-                        .background(Color.Black.copy(alpha = 0.78f), RoundedCornerShape(18.dp))
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Box(
-                        Modifier.size(9.dp).background(
-                            if (isRecording) Color.Red else Color(0xFF4CAF50),
-                            CircleShape
-                        )
-                    )
-                    Text(durationLabel, color = Color.White, style = MaterialTheme.typography.caption)
-                }
-            }
             // Horizon level overlay
             if (kotlin.math.abs(horizonRoll) < 5f && kotlin.math.abs(horizonPitch) < 5f) {
                 Canvas(Modifier.fillMaxSize().padding(16.dp)) {
@@ -846,13 +824,11 @@ fun CameraScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     if (isLatestMediaVideo && latestVideoFile != null) {
-                        Box(
-                            Modifier.size(56.dp).clip(CircleShape).background(Color.DarkGray)
-                                .clickable(enabled = !isRecording && !isStartingVideo && !isCapturing && countdown == 0, onClick = openLatestVideo),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.Videocam, contentDescription = "Putar video terakhir", tint = Color.White)
-                        }
+                        CameraVideoLastPreview(
+                            file = latestVideoFile!!,
+                            enabled = !isRecording && !isStartingVideo && !isCapturing && countdown == 0,
+                            onClick = openLatestVideo
+                        )
                     } else if (lastPhoto != null) {
                         val photo = lastPhoto!!
                         Image(
@@ -909,6 +885,36 @@ fun CameraScreen(
                 }
             }
         }
+        if (isVideoMode && (isStartingVideo || isRecording || lastRecordedDurationSeconds > 0)) {
+            val recordingActive = isStartingVideo || isRecording
+            val durationLabel = if (recordingActive) {
+                formatRecordingDuration(recordingDurationSeconds)
+            } else {
+                formatRecordedDuration(lastRecordedDurationSeconds)
+            }
+            Row(
+                modifier = Modifier.align(Alignment.TopCenter)
+                    .padding(top = 64.dp)
+                    .zIndex(2f)
+                    .background(Color.Black.copy(alpha = 0.88f), RoundedCornerShape(20.dp))
+                    .padding(horizontal = 16.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(9.dp)
+            ) {
+                Box(
+                    Modifier.size(11.dp).background(
+                        if (recordingActive) Color.Red else Color(0xFF4CAF50),
+                        CircleShape
+                    )
+                )
+                Text(
+                    durationLabel,
+                    color = Color.White,
+                    style = MaterialTheme.typography.subtitle1
+                )
+            }
+        }
+
         if (showLastPhoto) {
             PhotoFullscreenViewer(
                 photos = cameraViewerPhotos,
