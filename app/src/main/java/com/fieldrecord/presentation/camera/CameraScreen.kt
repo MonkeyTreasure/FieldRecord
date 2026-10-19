@@ -614,6 +614,12 @@ fun CameraScreen(
         }
     }
 
+    val recordLabel = videoModeRecordMockupLabel(
+        isVideoMode = isVideoMode,
+        isStartingVideo = isStartingVideo,
+        isRecording = isRecording,
+        elapsedSeconds = recordingDurationSeconds
+    )
     Box(modifier = Modifier.fillMaxSize()) {
         // Viewfinder centered
         Box(
@@ -677,13 +683,9 @@ fun CameraScreen(
                     drawLine(focusColor, Offset(point.x, point.y - 7.dp.toPx()), Offset(point.x, point.y + 7.dp.toPx()), strokeWidth = 2.dp.toPx())
                 }
             }
-            val recordLabel = videoModeRecordMockupLabel(
-                isVideoMode = isVideoMode,
-                isStartingVideo = isStartingVideo,
-                isRecording = isRecording,
-                elapsedSeconds = recordingDurationSeconds
-            )
-            CameraTelemetryOverlay(gpsLocation, compassDegrees, recordLabel, Modifier.fillMaxSize())
+            if (!telemetryUsesScreenBottomAnchor(viewfinderLandscape)) {
+                CameraTelemetryOverlay(gpsLocation, compassDegrees, recordLabel, Modifier.fillMaxSize())
+            }
             // Horizon level overlay
             if (kotlin.math.abs(horizonRoll) < 5f && kotlin.math.abs(horizonPitch) < 5f) {
                 Canvas(Modifier.fillMaxSize().padding(16.dp)) {
@@ -728,6 +730,10 @@ fun CameraScreen(
                     modifier = Modifier.align(Alignment.Center).background(MaterialTheme.colors.primary.copy(alpha = 0.85f), CircleShape).padding(24.dp)
                 )
             }
+        }
+
+        if (telemetryUsesScreenBottomAnchor(viewfinderLandscape)) {
+            CameraTelemetryOverlay(gpsLocation, compassDegrees, recordLabel, Modifier.fillMaxSize())
         }
 
         Column(
