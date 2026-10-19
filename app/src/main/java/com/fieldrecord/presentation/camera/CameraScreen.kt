@@ -15,6 +15,7 @@ import android.os.SystemClock
 import android.view.OrientationEventListener
 import android.view.Surface
 import androidx.camera.core.Camera
+import androidx.camera.core.AspectRatio
 import androidx.camera.core.CameraEffect
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
@@ -381,6 +382,7 @@ fun CameraScreen(
             val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
             val boundCamera = if (isVideoMode) {
                 val recorder = Recorder.Builder()
+                    .setAspectRatio(AspectRatio.RATIO_4_3)
                     .setQualitySelector(
                         QualitySelector.from(
                             Quality.HD,
@@ -617,7 +619,7 @@ fun CameraScreen(
                 .aspectRatio(if (viewfinderLandscape) 4f / 3f else 3f / 4f)
                 .clip(RoundedCornerShape(20.dp))
                 .align(Alignment.Center)
-                .offset(y = (-55).dp)
+                .offset(y = (-69).dp)
                 .pointerInput(camera) {
                     detectTapGestures { tap ->
                         camera?.let { activeCamera ->
