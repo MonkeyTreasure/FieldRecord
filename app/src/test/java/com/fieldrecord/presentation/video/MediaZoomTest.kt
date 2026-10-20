@@ -13,6 +13,13 @@ class MediaZoomTest {
     }
 
     @Test
+    fun zoomExpandsViewerToFullscreenViewportAfterLeavingFitScale() {
+        assertFalse(isMediaZoomed(1f))
+        assertFalse(isMediaZoomed(1.001f))
+        assertTrue(isMediaZoomed(1.01f))
+    }
+
+    @Test
     fun pinchZoomScalesAndKeepsPanInsideImageBounds() {
         val zoom = updateMediaZoom(
             current = MediaZoomTransform(),

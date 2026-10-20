@@ -58,6 +58,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Locale
 import com.fieldrecord.presentation.video.MediaZoomTransform
+import com.fieldrecord.presentation.video.isMediaZoomed
 import com.fieldrecord.presentation.video.shouldNavigateGallerySwipe
 import com.fieldrecord.presentation.video.updateMediaZoom
 import kotlinx.coroutines.launch
@@ -225,8 +226,38 @@ fun PhotoFullscreenViewer(
             }
         }
 
+        if (isMediaZoomed(photoZoomState.value.scale)) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+                    .clipToBounds()
+                    .onSizeChanged { photoViewportSize.value = it }
+                    .transformable(state = photoTransformableState, canPan = { true })
+                    .zIndex(15f)
+            ) {
+                Image(
+                    painter = painter,
+                    contentDescription = viewerPhotoDescription(photo),
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize().graphicsLayer {
+                        scaleX = photoZoomState.value.scale
+                        scaleY = photoZoomState.value.scale
+                        translationX = photoZoomState.value.offsetX
+                        translationY = photoZoomState.value.offsetY
+                    }
+                )
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = "Tutup tampilan foto", tint = Color.White)
+                }
+            }
+        }
+
         // Jika belum ada note, munculkan tombol melayang (FAB) di pojok kanan bawah.
-        if (displayedNote.isNullOrBlank()) {
+        if (displayedNote.isNullOrBlank() && !isMediaZoomed(photoZoomState.value.scale)) {
             FloatingActionButton(
                 onClick = {
                     noteDraft = ""

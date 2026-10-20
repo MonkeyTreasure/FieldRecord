@@ -32,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -81,7 +82,9 @@ internal fun VideoPlayerDialog(
     }
     var dragDistance by remember(file.absolutePath) { mutableStateOf(0f) }
     val dialogWindow = (LocalView.current.parent as? DialogWindowProvider)?.window
-    DisposableEffect(dialogWindow, isFullscreen) {
+    val isZoomed = isMediaZoomed(videoZoomState.value.scale)
+    val isExpanded = isFullscreen || isZoomed
+    DisposableEffect(dialogWindow, isExpanded) {
         val window = dialogWindow
         if (window == null) {
             onDispose { }
@@ -90,12 +93,12 @@ internal fun VideoPlayerDialog(
             val systemBars = WindowInsetsCompat.Type.systemBars()
             val wereSystemBarsVisible = ViewCompat.getRootWindowInsets(window.decorView)
                 ?.isVisible(systemBars) ?: true
-            if (isFullscreen) {
+            if (isExpanded) {
                 controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                 controller.hide(systemBars)
             }
             onDispose {
-                if (isFullscreen && wereSystemBarsVisible) controller.show(systemBars)
+                if (isExpanded && wereSystemBarsVisible) controller.show(systemBars)
             }
         }
     }
@@ -118,7 +121,7 @@ internal fun VideoPlayerDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(
             usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = !isFullscreen
+            decorFitsSystemWindows = !isExpanded
         )
     ) {
         val density = LocalDensity.current
@@ -126,6 +129,7 @@ internal fun VideoPlayerDialog(
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
+                .clipToBounds()
                 .background(Color.Black)
                 .clickable(
                     interactionSource = backgroundInteraction,
@@ -151,8 +155,8 @@ internal fun VideoPlayerDialog(
             val aspect = videoAspectRatio.takeIf { it.isFinite() && it > 0f } ?: (16f / 9f)
             val maxWidthPx = constraints.maxWidth.toFloat()
             val maxHeightPx = constraints.maxHeight.toFloat()
-            val playerWidthPx = minOf(maxWidthPx, maxHeightPx * aspect).coerceAtLeast(1f)
-            val playerHeightPx = (playerWidthPx / aspect).coerceAtLeast(1f)
+            val playerWidthPx = if (isExpanded) maxWidthPx else minOf(maxWidthPx, maxHeightPx * aspect).coerceAtLeast(1f)
+            val playerHeightPx = if (isExpanded) maxHeightPx else (playerWidthPx / aspect).coerceAtLeast(1f)
             val playerWidth = with(density) { playerWidthPx.toDp() }
             val playerHeight = with(density) { playerHeightPx.toDp() }
 
@@ -208,12 +212,19 @@ internal fun VideoPlayerDialog(
                 Icon(Icons.Default.Close, contentDescription = "Tutup pemutar video", tint = Color.White)
             }
             IconButton(
-                onClick = { isFullscreen = !isFullscreen },
+                onClick = {
+                    if (isZoomed) {
+                        videoZoomState.value = MediaZoomTransform()
+                        isFullscreen = false
+                    } else {
+                        isFullscreen = !isFullscreen
+                    }
+                },
                 modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)
             ) {
                 Icon(
-                    imageVector = if (isFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                    contentDescription = if (isFullscreen) "Keluar dari layar penuh" else "Layar penuh",
+                    imageVector = if (isExpanded) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                    contentDescription = if (isExpanded) "Keluar dari layar penuh" else "Layar penuh",
                     tint = Color.White
                 )
             }
