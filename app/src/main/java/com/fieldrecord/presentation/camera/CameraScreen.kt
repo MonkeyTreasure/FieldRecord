@@ -347,11 +347,9 @@ fun CameraScreen(
         onDispose { listener.disable() }
     }
 
-    LaunchedEffect(targetRotation, imageCapture, videoCapture, isStartingVideo, isRecording) {
+    LaunchedEffect(targetRotation, imageCapture, videoCapture) {
         imageCapture?.targetRotation = targetRotation
-        if (shouldUpdateVideoTargetRotation(isStartingVideo, isRecording)) {
-            videoCapture?.targetRotation = targetRotation
-        }
+        videoCapture?.targetRotation = targetRotation
     }
 
     LaunchedEffect(flashSetting, imageCapture) {
@@ -470,8 +468,6 @@ fun CameraScreen(
             android.widget.Toast.makeText(context, "Kamera video belum siap", android.widget.Toast.LENGTH_SHORT).show()
         } else {
             isStartingVideo = true
-            val initialTargetRotation = targetRotation
-            capture.targetRotation = initialTargetRotation
             recordingDurationSeconds = 0
             videoWatermarkSnapshot.set(buildVideoWatermarkFrame())
             captureScope.launch {
