@@ -2,7 +2,9 @@ package com.fieldrecord.presentation.map
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color as AndroidColor
@@ -81,6 +83,19 @@ fun MapScreen(
     var mapLibreMapRef by remember { mutableStateOf<MapLibreMap?>(null) }
     var mapViewRef by remember { mutableStateOf<MapView?>(null) }
     var currentLocation by remember { mutableStateOf<LatLng?>(null) }
+    val temporaryGuidePins = remember { mutableStateListOf<TemporaryGuidePin>() }
+    var selectedGuidePinId by remember { mutableStateOf<Long?>(null) }
+    var isFollowingLocation by remember { mutableStateOf(false) }
+    val selectedGuidePin = temporaryGuidePins.firstOrNull { it.id == selectedGuidePinId }
+    val latestOnGuidePinCreated = rememberUpdatedState<(LatLng) -> Unit>(newValue = { point ->
+        val pin = TemporaryGuidePin(System.nanoTime(), point.latitude, point.longitude)
+        temporaryGuidePins.add(pin)
+        selectedGuidePinId = pin.id
+        isFollowingLocation = false
+    })
+    val latestOnGuidePinSelected = rememberUpdatedState<(Long) -> Unit>(newValue = { pinId ->
+        selectedGuidePinId = temporaryGuidePins.firstOrNull { it.id == pinId }?.id
+    })
     val mapLayerSelection = remember(context) {
         val preferences = context.getSharedPreferences("map_layer_preferences", Context.MODE_PRIVATE)
         MapLayerSelection(object : MapLayerStore {
@@ -92,7 +107,6 @@ fun MapScreen(
     }
     var isSatellite by remember(mapLayerSelection) { mutableStateOf(mapLayerSelection.read()) }
     var isNorthLocked by remember { mutableStateOf(true) }
-    var isFollowingLocation by remember { mutableStateOf(false) }
     var hasUserExploredMap by remember { mutableStateOf(false) }
     var cameraRefresh by remember { mutableIntStateOf(0) }
     var mapZoom by remember { mutableFloatStateOf(16f) }
@@ -285,6 +299,10 @@ fun MapScreen(
                         map.setOnMarkerClickListener { marker ->
                                                     val markerTitle = marker.title.orEmpty()
                                                     when {
+                                                        markerTitle.startsWith("guide-pin:") -> {
+                                                            markerTitle.removePrefix("guide-pin:").toLongOrNull()?.let(latestOnGuidePinSelected.value)
+                                                            true
+                                                        }
                                                         markerTitle.startsWith("photo:") -> {
                                                             val photoId = markerTitle.removePrefix("photo:").toLongOrNull()
                                                             val photo = latestPhotos.firstOrNull { it.id == photoId }
@@ -301,6 +319,10 @@ fun MapScreen(
                                                         else -> false
                                                     }
                                                 }
+                        map.addOnMapLongClickListener { point ->
+                            latestOnGuidePinCreated.value(point)
+                            true
+                        }
                     }
                 }
             },
@@ -322,6 +344,14 @@ fun MapScreen(
                         }
                         val filteredPhotos = if (noteSearchQuery.isBlank()) tagFilteredPhotos else noteSearchResults
                         renderPhotoMarkers(map, context, filteredPhotos)
+                        temporaryGuidePins.forEach { pin ->
+                            map.addMarker(
+                                MarkerOptions()
+                                    .position(LatLng(pin.latitude, pin.longitude))
+                                    .title("guide-pin:${pin.id}")
+                                    .snippet("Titik panduan sementara")
+                            )
+                        }
                     }
                 }
             }
@@ -492,6 +522,59 @@ fun MapScreen(
             }
         }
 
+        selectedGuidePin?.let { pin ->
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(start = 12.dp, end = 88.dp, bottom = 16.dp)
+                    .fillMaxWidth(),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                color = MaterialTheme.colors.surface,
+                elevation = 8.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Pin tujuan", style = MaterialTheme.typography.subtitle2, color = MaterialTheme.colors.onSurface)
+                        Text(
+                            String.format(Locale.US, "%.6f, %.6f", pin.latitude, pin.longitude),
+                            style = MaterialTheme.typography.caption,
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.72f)
+                        )
+                    }
+                    IconButton(onClick = { selectedGuidePinId = null }) {
+                        Icon(Icons.Default.Close, contentDescription = "Tutup panduan pin")
+                    }
+                    Button(onClick = { launchGuideToPin(context, pin) }) {
+                        Icon(Icons.Default.Navigation, contentDescription = null)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Guide")
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun launchGuideToPin(context: Context, pin: TemporaryGuidePin) {
+    val googleNavigation = Intent(
+        Intent.ACTION_VIEW,
+        Uri.parse(googleNavigationUri(pin.latitude, pin.longitude))
+    )
+    try {
+        context.startActivity(googleNavigation)
+    } catch (_: Exception) {
+        val mapsDirections = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("https://www.google.com/maps/dir/?api=1&destination=${pin.latitude},${pin.longitude}")
+        )
+        try {
+            context.startActivity(mapsDirections)
+        } catch (_: Exception) {
+            android.widget.Toast.makeText(context, "Tidak ada aplikasi navigasi yang tersedia", android.widget.Toast.LENGTH_LONG).show()
+        }
     }
 }
 
