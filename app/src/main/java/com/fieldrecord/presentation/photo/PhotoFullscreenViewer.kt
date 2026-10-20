@@ -7,6 +7,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.horizontalScroll
@@ -25,6 +26,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.isSpecified
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -50,6 +53,8 @@ import com.fieldrecord.presentation.PhotoNoteText
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Locale
+import com.fieldrecord.presentation.video.MediaZoomTransform
+import com.fieldrecord.presentation.video.updateMediaZoom
 import kotlinx.coroutines.launch
 
 private val Emerald = Color(0xFF673AB7)
@@ -81,6 +86,7 @@ fun PhotoFullscreenViewer(
     }
     var dragDistance by remember { mutableFloatStateOf(0f) }
     val photo = photos[currentIndex.coerceIn(0, photos.lastIndex)]
+    val photoZoomState = remember(photo.filePath) { mutableStateOf(MediaZoomTransform()) }
     var displayedNote by remember(photo.id, photo.note) { mutableStateOf(photo.note) }
     var showNoteEditor by remember(photo.id) { mutableStateOf(false) }
     var noteDraft by remember(photo.id) { mutableStateOf(photo.note.orEmpty()) }
@@ -152,13 +158,33 @@ fun PhotoFullscreenViewer(
                         .fillMaxWidth()
                         .weight(1f, fill = false)
                         .aspectRatio(ratio)
-                        .pointerInput(Unit) { detectTapGestures { } } // tap foto tidak menutup
+                        .clipToBounds()
+                        .pointerInput(photo.filePath) { detectTapGestures { } }
+                        .pointerInput(photo.filePath) {
+                            detectTransformGestures { centroid, pan, zoomChange, _ ->
+                                photoZoomState.value = updateMediaZoom(
+                                    current = photoZoomState.value,
+                                    zoomChange = zoomChange,
+                                    panX = pan.x,
+                                    panY = pan.y,
+                                    centroidX = centroid.x,
+                                    centroidY = centroid.y,
+                                    viewportWidth = size.width.toFloat(),
+                                    viewportHeight = size.height.toFloat()
+                                )
+                            }
+                        }
                 ) {
                     Image(
                         painter = painter,
                         contentDescription = viewerPhotoDescription(photo),
                         contentScale = ContentScale.Fit,
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier.fillMaxSize().graphicsLayer {
+                            scaleX = photoZoomState.value.scale
+                            scaleY = photoZoomState.value.scale
+                            translationX = photoZoomState.value.offsetX
+                            translationY = photoZoomState.value.offsetY
+                        }
                     )
                 }
 

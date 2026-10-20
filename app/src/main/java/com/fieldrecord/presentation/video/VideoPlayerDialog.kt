@@ -7,6 +7,7 @@ import android.widget.MediaController
 import android.widget.VideoView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,6 +30,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -50,6 +53,7 @@ import kotlinx.coroutines.withContext
 internal fun VideoPlayerDialog(file: File, onDismiss: () -> Unit) {
     val context = LocalContext.current
     var isFullscreen by remember(file.absolutePath) { mutableStateOf(false) }
+    val videoZoomState = remember(file.absolutePath) { mutableStateOf(MediaZoomTransform()) }
     val dialogWindow = (LocalView.current.parent as? DialogWindowProvider)?.window
     DisposableEffect(dialogWindow, isFullscreen) {
         val window = dialogWindow
@@ -133,6 +137,26 @@ internal fun VideoPlayerDialog(file: File, onDismiss: () -> Unit) {
                     modifier = Modifier
                         .size(width = playerWidth, height = playerHeight)
                         .align(Alignment.Center)
+                        .pointerInput(file.absolutePath) {
+                            detectTransformGestures { centroid, pan, zoomChange, _ ->
+                                videoZoomState.value = updateMediaZoom(
+                                    current = videoZoomState.value,
+                                    zoomChange = zoomChange,
+                                    panX = pan.x,
+                                    panY = pan.y,
+                                    centroidX = centroid.x,
+                                    centroidY = centroid.y,
+                                    viewportWidth = size.width.toFloat(),
+                                    viewportHeight = size.height.toFloat()
+                                )
+                            }
+                        }
+                        .graphicsLayer {
+                            scaleX = videoZoomState.value.scale
+                            scaleY = videoZoomState.value.scale
+                            translationX = videoZoomState.value.offsetX
+                            translationY = videoZoomState.value.offsetY
+                        }
                 )
                 DisposableEffect(playerView) {
                     onDispose { playerView.stopPlayback() }

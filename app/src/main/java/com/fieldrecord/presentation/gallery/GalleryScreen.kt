@@ -255,12 +255,16 @@ fun GalleryScreen(
                                 backgroundColor = if (selected) Color(0xFF673AB7).copy(alpha = 0.7f) else MaterialTheme.colors.surface,
                                 elevation = 2.dp
                             ) {
-                                Box(Modifier.fillMaxSize()) {
+                                Box(
+                                    Modifier.fillMaxSize().background(
+                                        if (selected) Color(0xFF673AB7).copy(alpha = 0.7f) else Color.Black
+                                    )
+                                ) {
                                     androidx.compose.foundation.Image(
                                         painter = rememberAsyncImagePainter(File(photo.filePath)),
                                         contentDescription = photo.fileName,
                                         modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Crop
+                                        contentScale = ContentScale.Fit
                                     )
                                     if (firstTag != null && tagColor != null) {
                                         Box(
