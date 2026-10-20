@@ -5,9 +5,12 @@ import android.media.MediaPlayer
 import android.net.Uri
 import android.widget.MediaController
 import android.widget.VideoView
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
@@ -35,6 +38,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -49,11 +54,32 @@ import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun VideoPlayerDialog(file: File, onDismiss: () -> Unit) {
+internal fun VideoPlayerDialog(
+    file: File,
+    onDismiss: () -> Unit,
+    onSwipeLeft: (() -> Unit)? = null,
+    onSwipeRight: (() -> Unit)? = null
+) {
     val context = LocalContext.current
     var isFullscreen by remember(file.absolutePath) { mutableStateOf(false) }
     val videoZoomState = remember(file.absolutePath) { mutableStateOf(MediaZoomTransform()) }
+    val videoViewportSize = remember(file.absolutePath) { mutableStateOf(IntSize.Zero) }
+    val videoTransformState = rememberTransformableState { zoomChange, panChange, _ ->
+        val viewport = videoViewportSize.value
+        videoZoomState.value = updateMediaZoom(
+            current = videoZoomState.value,
+            zoomChange = zoomChange,
+            panX = panChange.x,
+            panY = panChange.y,
+            centroidX = viewport.width / 2f,
+            centroidY = viewport.height / 2f,
+            viewportWidth = viewport.width.toFloat(),
+            viewportHeight = viewport.height.toFloat()
+        )
+    }
+    var dragDistance by remember(file.absolutePath) { mutableStateOf(0f) }
     val dialogWindow = (LocalView.current.parent as? DialogWindowProvider)?.window
     DisposableEffect(dialogWindow, isFullscreen) {
         val window = dialogWindow
@@ -106,6 +132,21 @@ internal fun VideoPlayerDialog(file: File, onDismiss: () -> Unit) {
                     indication = null,
                     onClick = onDismiss
                 )
+                .pointerInput(file.absolutePath, onSwipeLeft, onSwipeRight) {
+                    detectHorizontalDragGestures(
+                        onDragEnd = {
+                            if (shouldNavigateGallerySwipe(videoZoomState.value.scale) && kotlin.math.abs(dragDistance) > 60f) {
+                                if (dragDistance < 0f) onSwipeLeft?.invoke() else onSwipeRight?.invoke()
+                            }
+                            dragDistance = 0f
+                        },
+                        onHorizontalDrag = { _, amount ->
+                            if ((onSwipeLeft != null || onSwipeRight != null) && shouldNavigateGallerySwipe(videoZoomState.value.scale)) {
+                                dragDistance += amount
+                            }
+                        }
+                    )
+                }
         ) {
             val aspect = videoAspectRatio.takeIf { it.isFinite() && it > 0f } ?: (16f / 9f)
             val maxWidthPx = constraints.maxWidth.toFloat()
@@ -137,20 +178,11 @@ internal fun VideoPlayerDialog(file: File, onDismiss: () -> Unit) {
                     modifier = Modifier
                         .size(width = playerWidth, height = playerHeight)
                         .align(Alignment.Center)
-                        .pointerInput(file.absolutePath) {
-                            detectTransformGestures { centroid, pan, zoomChange, _ ->
-                                videoZoomState.value = updateMediaZoom(
-                                    current = videoZoomState.value,
-                                    zoomChange = zoomChange,
-                                    panX = pan.x,
-                                    panY = pan.y,
-                                    centroidX = centroid.x,
-                                    centroidY = centroid.y,
-                                    viewportWidth = size.width.toFloat(),
-                                    viewportHeight = size.height.toFloat()
-                                )
-                            }
-                        }
+                        .onSizeChanged { videoViewportSize.value = it }
+                        .transformable(
+                            state = videoTransformState,
+                            canPan = { !shouldNavigateGallerySwipe(videoZoomState.value.scale) }
+                        )
                         .graphicsLayer {
                             scaleX = videoZoomState.value.scale
                             scaleY = videoZoomState.value.scale

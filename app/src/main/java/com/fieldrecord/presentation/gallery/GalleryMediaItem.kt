@@ -23,6 +23,12 @@ internal sealed class GalleryMediaItem {
     }
 }
 
+internal fun gallerySwipeTargetIndex(currentIndex: Int, itemCount: Int, swipeLeft: Boolean): Int? {
+    if (itemCount <= 0 || currentIndex !in 0 until itemCount) return null
+    val target = currentIndex + if (swipeLeft) 1 else -1
+    return target.takeIf { it in 0 until itemCount }
+}
+
 internal fun buildGalleryTimeline(
     photos: List<FieldPhoto>,
     videos: List<GalleryVideoItem>

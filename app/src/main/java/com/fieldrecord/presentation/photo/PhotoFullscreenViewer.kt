@@ -81,6 +81,10 @@ fun PhotoFullscreenViewer(
     photos: List<FieldPhoto>,
     initialIndex: Int = 0,
     knownTags: Set<String> = photos.flatMap { extractPhotoTags(it.note) }.toSet(),
+    displayIndex: Int? = null,
+    displayTotal: Int? = null,
+    onSwipeLeft: (() -> Unit)? = null,
+    onSwipeRight: (() -> Unit)? = null,
     onSaveNote: suspend (photoId: Long, note: String?) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -133,15 +137,19 @@ fun PhotoFullscreenViewer(
         intrinsic.width / intrinsic.height
     } else 4f / 3f
 
-    val swipeModifier = Modifier.pointerInput(photos.size, currentIndex) {
+    val swipeModifier = Modifier.pointerInput(photos.size, currentIndex, onSwipeLeft, onSwipeRight) {
         detectHorizontalDragGestures(
             onDragEnd = {
                 if (shouldNavigateGallerySwipe(photoZoomState.value.scale) && kotlin.math.abs(dragDistance) > 60f) {
                     // Geser kanan = sebelumnya, geser kiri = berikutnya.
-                    currentIndex = if (dragDistance < 0f) {
-                        (currentIndex + 1).coerceAtMost(photos.lastIndex)
+                    if (dragDistance < 0f) {
+                        onSwipeLeft?.invoke() ?: run {
+                            currentIndex = (currentIndex + 1).coerceAtMost(photos.lastIndex)
+                        }
                     } else {
-                        (currentIndex - 1).coerceAtLeast(0)
+                        onSwipeRight?.invoke() ?: run {
+                            currentIndex = (currentIndex - 1).coerceAtLeast(0)
+                        }
                     }
                 }
                 dragDistance = 0f
@@ -160,7 +168,7 @@ fun PhotoFullscreenViewer(
     ) {
         Column(Modifier.fillMaxSize()) {
             PhotoMetadataHeader(
-                photo, currentIndex, photos.size,
+                photo, displayIndex ?: currentIndex, displayTotal ?: photos.size,
                 onShareClick = { showShareDialog = true },
                 onClose = onDismiss
             )

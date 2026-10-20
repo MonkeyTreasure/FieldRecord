@@ -47,8 +47,6 @@ import com.fieldrecord.data.local.PhotoTagColorStore
 import com.fieldrecord.domain.model.FieldPhoto
 import com.fieldrecord.domain.model.extractPhotoTags
 import com.fieldrecord.presentation.camera.PhotoFileManager
-import com.fieldrecord.presentation.photo.PhotoFullscreenViewer
-import com.fieldrecord.presentation.video.VideoPlayerDialog
 import java.io.File
 import java.util.Calendar
 
@@ -64,9 +62,8 @@ fun GalleryScreen(
     val lazyPagingItems = viewModel.pager.collectAsLazyPagingItems()
     val monthLabel = viewModel.getCurrentMonthLabel()
     var selectedIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
-    var fullscreenPhotos by remember { mutableStateOf<List<FieldPhoto>?>(null) }
-    var fullscreenIndex by remember { mutableIntStateOf(0) }
-    var selectedVideo by remember { mutableStateOf<File?>(null) }
+    var fullscreenMedia by remember { mutableStateOf<List<GalleryMediaItem>?>(null) }
+    var fullscreenMediaIndex by remember { mutableIntStateOf(0) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     var pendingCsvContent by remember { mutableStateOf<String?>(null) }
@@ -104,7 +101,6 @@ fun GalleryScreen(
             }
         }
     }
-    val chronologicalPhotos = remember(loadedPhotos) { loadedPhotos.sortedBy { it.timestamp } }
     val currentMonth by viewModel.currentMonth.collectAsState()
     val allVideos by viewModel.videos.collectAsState()
     val monthRange = remember(currentMonth.timeInMillis) {
@@ -243,8 +239,8 @@ fun GalleryScreen(
                                                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                                 selectedIds = if (selected) selectedIds - photo.id else selectedIds + photo.id
                                             } else {
-                                                fullscreenPhotos = chronologicalPhotos
-                                                fullscreenIndex = chronologicalPhotos.indexOfFirst { it.id == photo.id }.coerceAtLeast(0)
+                                                fullscreenMedia = mediaTimeline
+                                                fullscreenMediaIndex = mediaTimeline.indexOf(media).coerceAtLeast(0)
                                             }
                                         },
                                         onLongClick = {
@@ -289,7 +285,8 @@ fun GalleryScreen(
                                     if (selectionMode) {
                                         Toast.makeText(context, "Pilih foto untuk aksi bagikan atau hapus", Toast.LENGTH_SHORT).show()
                                     } else {
-                                        selectedVideo = File(media.video.filePath)
+                                        fullscreenMedia = mediaTimeline
+                                        fullscreenMediaIndex = mediaTimeline.indexOf(media).coerceAtLeast(0)
                                     }
                                 },
                                 onLongClick = {
@@ -324,20 +321,17 @@ fun GalleryScreen(
             )
         }
 
-        selectedVideo?.let { video ->
-            VideoPlayerDialog(file = video, onDismiss = { selectedVideo = null })
-        }
-
-        fullscreenPhotos?.let { photos ->
-            PhotoFullscreenViewer(
-                photos = photos,
-                initialIndex = fullscreenIndex,
-                knownTags = lazyPagingItems.itemSnapshotList.items.filterNotNull().flatMap { com.fieldrecord.domain.model.extractPhotoTags(it.note) }.toSet(),
+        fullscreenMedia?.let { timeline ->
+            GalleryMediaViewer(
+                timeline = timeline,
+                initialIndex = fullscreenMediaIndex,
+                knownTags = lazyPagingItems.itemSnapshotList.items.filterNotNull()
+                    .flatMap { extractPhotoTags(it.note) }.toSet(),
                 onSaveNote = { photoId, note ->
                     viewModel.updatePhotoNote(photoId, note)
                     lazyPagingItems.refresh()
                 },
-                onDismiss = { fullscreenPhotos = null }
+                onDismiss = { fullscreenMedia = null }
             )
         }
     }
