@@ -69,11 +69,12 @@ class GalleryViewModel @Inject constructor(
         }
     }
 
-    suspend fun deleteSelected(photos: List<FieldPhoto>) {
+    internal suspend fun deleteSelected(photos: List<FieldPhoto>, videos: List<GalleryVideoItem> = emptyList()) {
         photos.forEach { photo ->
             repository.deletePhoto(photo)
             java.io.File(photo.filePath).delete()
         }
+        videos.forEach { video -> java.io.File(video.filePath).delete() }
     }
 
     suspend fun updatePhotoNote(photoId: Long, note: String?) {

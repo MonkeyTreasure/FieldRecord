@@ -240,9 +240,7 @@ private fun readVideoAspectRatio(file: File): Float {
         val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
         val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
         val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
-        val displayWidth = if (rotation % 180 != 0) height else width
-        val displayHeight = if (rotation % 180 != 0) width else height
-        if (displayWidth > 0 && displayHeight > 0) displayWidth.toFloat() / displayHeight else 16f / 9f
+        videoDisplayAspectRatio(width, height, rotation)
     } catch (_: Exception) {
         16f / 9f
     } finally {

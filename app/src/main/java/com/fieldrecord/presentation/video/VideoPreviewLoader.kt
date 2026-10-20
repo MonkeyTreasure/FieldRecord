@@ -30,7 +30,7 @@ internal fun loadVideoPreview(file: File): VideoPreviewInfo? {
 }
 
 private fun rotateFrame(bitmap: Bitmap, rotationDegrees: Int): Bitmap {
-    val normalizedRotation = ((rotationDegrees % 360) + 360) % 360
+    val normalizedRotation = normalizeVideoRotationDegrees(rotationDegrees)
     if (normalizedRotation == 0) return bitmap
     val matrix = Matrix().apply { postRotate(normalizedRotation.toFloat()) }
     val rotated = Bitmap.createBitmap(

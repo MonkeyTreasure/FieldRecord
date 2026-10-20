@@ -23,6 +23,12 @@ internal sealed class GalleryMediaItem {
     }
 }
 
+internal fun toggleGallerySelection(selectedKeys: Set<String>, key: String): Set<String> =
+    if (key in selectedKeys) selectedKeys - key else selectedKeys + key
+
+internal fun toggleAllGallerySelection(selectedKeys: Set<String>, allVisibleKeys: Set<String>): Set<String> =
+    if (allVisibleKeys.isNotEmpty() && selectedKeys.containsAll(allVisibleKeys)) emptySet() else allVisibleKeys
+
 internal fun gallerySwipeTargetIndex(currentIndex: Int, itemCount: Int, swipeLeft: Boolean): Int? {
     if (itemCount <= 0 || currentIndex !in 0 until itemCount) return null
     val target = currentIndex + if (swipeLeft) 1 else -1

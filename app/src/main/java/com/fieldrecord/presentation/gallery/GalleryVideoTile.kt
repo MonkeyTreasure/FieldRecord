@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
@@ -40,6 +41,7 @@ import kotlinx.coroutines.withContext
 @Composable
 internal fun GalleryVideoTile(
     video: GalleryVideoItem,
+    selected: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
@@ -56,6 +58,11 @@ internal fun GalleryVideoTile(
             .fillMaxWidth()
             .aspectRatio(1f)
             .clip(RoundedCornerShape(4.dp))
+            .border(
+                width = if (selected) 3.dp else 0.dp,
+                color = if (selected) GallerySelectionTheme.borderColor else Color.Transparent,
+                shape = RoundedCornerShape(4.dp)
+            )
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         elevation = 2.dp
     ) {
@@ -68,6 +75,9 @@ internal fun GalleryVideoTile(
                     contentScale = ContentScale.Crop,
                     alignment = Alignment.BottomStart
                 )
+            }
+            if (selected) {
+                Box(Modifier.fillMaxSize().background(Color(0xFF673AB7).copy(alpha = 0.3f)))
             }
             Icon(
                 imageVector = Icons.Default.PlayArrow,

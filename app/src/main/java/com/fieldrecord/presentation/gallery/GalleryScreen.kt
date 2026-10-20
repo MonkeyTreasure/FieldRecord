@@ -61,7 +61,7 @@ fun GalleryScreen(
     val haptics = LocalHapticFeedback.current
     val lazyPagingItems = viewModel.pager.collectAsLazyPagingItems()
     val monthLabel = viewModel.getCurrentMonthLabel()
-    var selectedIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var selectedMediaKeys by remember { mutableStateOf<Set<String>>(emptySet()) }
     var fullscreenMedia by remember { mutableStateOf<List<GalleryMediaItem>?>(null) }
     var fullscreenMediaIndex by remember { mutableIntStateOf(0) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
@@ -126,7 +126,7 @@ fun GalleryScreen(
     val mediaTimeline = remember(loadedPhotos, monthVideos) {
         buildGalleryTimeline(loadedPhotos, monthVideos)
     }
-    val selectionMode = selectedIds.isNotEmpty()
+    val selectionMode = selectedMediaKeys.isNotEmpty()
 
     LaunchedEffect(Unit) {
         viewModel.syncPhotosFromStorage(context)
@@ -151,20 +151,30 @@ fun GalleryScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("${selectedIds.size} dipilih", color = MaterialTheme.colors.onSurface)
+                        Text("${selectedMediaKeys.size} dipilih", color = MaterialTheme.colors.onSurface)
                         Row {
                             IconButton(onClick = {
-                                val selected = loadedPhotos.filter { it.id in selectedIds }
-                                showMultiShareDialog(context, selected)
+                                val selected = mediaTimeline.filter { it.key in selectedMediaKeys }
+                                val selectedVideos = selected.filterIsInstance<GalleryMediaItem.Video>()
+                                if (selectedVideos.isEmpty()) {
+                                    showMultiShareDialog(
+                                        context,
+                                        selected.filterIsInstance<GalleryMediaItem.Photo>().map { it.photo }
+                                    )
+                                } else {
+                                    shareSelectedMedia(context, selected)
+                                }
                             }) { Icon(Icons.Default.Share, "Bagikan") }
                             IconButton(onClick = {
-                                selectedIds = if (selectedIds.size == loadedPhotos.size) emptySet()
-                                else loadedPhotos.map { it.id }.toSet()
-                            }) { Icon(Icons.Default.SelectAll, "Pilih semua") }
+                                selectedMediaKeys = toggleAllGallerySelection(
+                                    selectedMediaKeys,
+                                    mediaTimeline.map { it.key }.toSet()
+                                )
+                            }) { Icon(Icons.Default.SelectAll, "Pilih semua foto dan video") }
                             IconButton(onClick = { showDeleteConfirm = true }) {
-                                Icon(Icons.Default.Delete, "Hapus foto terpilih", tint = Color.White)
+                                Icon(Icons.Default.Delete, "Hapus media terpilih", tint = Color.White)
                             }
-                            IconButton(onClick = { selectedIds = emptySet() }) {
+                            IconButton(onClick = { selectedMediaKeys = emptySet() }) {
                                 Icon(Icons.Default.Close, "Batalkan pilihan")
                             }
                         }
@@ -221,7 +231,8 @@ fun GalleryScreen(
                     when (media) {
                         is GalleryMediaItem.Photo -> {
                             val photo = media.photo
-                            val selected = photo.id in selectedIds
+                            val selectedKey = media.key
+                            val selected = selectedKey in selectedMediaKeys
                             val firstTag = remember(photo.note) { extractPhotoTags(photo.note).firstOrNull() }
                             val tagColor = if (firstTag == null) null else remember(firstTag) { tagColorStore.colorFor(firstTag) }
                             Card(
@@ -237,7 +248,7 @@ fun GalleryScreen(
                                         onClick = {
                                             if (selectionMode) {
                                                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                selectedIds = if (selected) selectedIds - photo.id else selectedIds + photo.id
+                                                selectedMediaKeys = toggleGallerySelection(selectedMediaKeys, selectedKey)
                                             } else {
                                                 fullscreenMedia = mediaTimeline
                                                 fullscreenMediaIndex = mediaTimeline.indexOf(media).coerceAtLeast(0)
@@ -245,7 +256,7 @@ fun GalleryScreen(
                                         },
                                         onLongClick = {
                                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            selectedIds = if (selected) selectedIds - photo.id else selectedIds + photo.id
+                                            selectedMediaKeys = toggleGallerySelection(selectedMediaKeys, selectedKey)
                                         }
                                     ),
                                 backgroundColor = if (selected) Color(0xFF673AB7).copy(alpha = 0.7f) else MaterialTheme.colors.surface,
@@ -279,18 +290,23 @@ fun GalleryScreen(
                             }
                         }
                         is GalleryMediaItem.Video -> {
+                            val selectedKey = media.key
+                            val selected = selectedKey in selectedMediaKeys
                             GalleryVideoTile(
                                 video = media.video,
+                                selected = selected,
                                 onClick = {
                                     if (selectionMode) {
-                                        Toast.makeText(context, "Pilih foto untuk aksi bagikan atau hapus", Toast.LENGTH_SHORT).show()
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        selectedMediaKeys = toggleGallerySelection(selectedMediaKeys, selectedKey)
                                     } else {
                                         fullscreenMedia = mediaTimeline
                                         fullscreenMediaIndex = mediaTimeline.indexOf(media).coerceAtLeast(0)
                                     }
                                 },
                                 onLongClick = {
-                                    Toast.makeText(context, "Video dapat diputar dari galeri", Toast.LENGTH_SHORT).show()
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    selectedMediaKeys = toggleGallerySelection(selectedMediaKeys, selectedKey)
                                 }
                             )
                         }
@@ -302,16 +318,19 @@ fun GalleryScreen(
         if (showDeleteConfirm) {
             AlertDialog(
                 onDismissRequest = { showDeleteConfirm = false },
-                title = { Text("Hapus foto terpilih?") },
-                text = { Text("${selectedIds.size} foto akan dihapus permanen dari galeri dan penyimpanan aplikasi.") },
+                title = { Text("Hapus media terpilih?") },
+                text = { Text("${selectedMediaKeys.size} foto/video akan dihapus permanen dari galeri dan penyimpanan aplikasi.") },
                 confirmButton = {
                     TextButton(onClick = {
-                        val targets = loadedPhotos.filter { it.id in selectedIds }
+                        val targets = mediaTimeline.filter { it.key in selectedMediaKeys }
+                        val photos = targets.filterIsInstance<GalleryMediaItem.Photo>().map { it.photo }
+                        val videos = targets.filterIsInstance<GalleryMediaItem.Video>().map { it.video }
                         showDeleteConfirm = false
                         scope.launch {
-                            viewModel.deleteSelected(targets)
-                            selectedIds = emptySet()
+                            viewModel.deleteSelected(photos, videos)
+                            selectedMediaKeys = emptySet()
                             lazyPagingItems.refresh()
+                            viewModel.syncVideosFromStorage()
                         }
                     }) { Text("Hapus", color = MaterialTheme.colors.error) }
                 },
@@ -334,6 +353,44 @@ fun GalleryScreen(
                 onDismiss = { fullscreenMedia = null }
             )
         }
+    }
+}
+
+private fun shareSelectedMedia(context: android.content.Context, selected: List<GalleryMediaItem>) {
+    val mediaFiles = selected.mapNotNull { item ->
+        when (item) {
+            is GalleryMediaItem.Photo -> File(item.photo.filePath)
+            is GalleryMediaItem.Video -> File(item.video.filePath)
+        }.takeIf { it.isFile }
+    }
+    val uris = mediaFiles.map { file ->
+        FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    }
+    if (uris.isEmpty()) {
+        Toast.makeText(context, "File media tidak ditemukan", Toast.LENGTH_SHORT).show()
+        return
+    }
+    val allVideos = selected.all { it is GalleryMediaItem.Video }
+    val allPhotos = selected.all { it is GalleryMediaItem.Photo }
+    val intent = Intent(
+        if (uris.size == 1) Intent.ACTION_SEND else Intent.ACTION_SEND_MULTIPLE
+    ).apply {
+        type = when {
+            allVideos -> "video/*"
+            allPhotos -> "image/jpeg"
+            else -> "*/*"
+        }
+        if (uris.size == 1) putExtra(Intent.EXTRA_STREAM, uris.first())
+        else putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
+        clipData = ClipData.newUri(context.contentResolver, mediaFiles.first().name, uris.first()).apply {
+            uris.drop(1).forEach { addItem(ClipData.Item(it)) }
+        }
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    try {
+        context.startActivity(Intent.createChooser(intent, "Bagikan media terpilih"))
+    } catch (error: Exception) {
+        Toast.makeText(context, "Gagal membagikan media: ${error.message ?: "kesalahan berbagi"}", Toast.LENGTH_LONG).show()
     }
 }
 
