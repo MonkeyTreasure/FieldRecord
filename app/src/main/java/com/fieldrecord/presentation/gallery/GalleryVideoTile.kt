@@ -65,7 +65,8 @@ internal fun GalleryVideoTile(
                     bitmap = thumbnail.asImageBitmap(),
                     contentDescription = "Video ${video.fileName}",
                     modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Fit
+                    contentScale = ContentScale.Crop,
+                    alignment = Alignment.BottomStart
                 )
             }
             Icon(

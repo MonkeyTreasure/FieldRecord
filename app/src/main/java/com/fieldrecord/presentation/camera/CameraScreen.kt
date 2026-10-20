@@ -340,12 +340,7 @@ fun CameraScreen(
         val listener = object : OrientationEventListener(context) {
             override fun onOrientationChanged(orientation: Int) {
                 if (orientation == ORIENTATION_UNKNOWN) return
-                targetRotation = when (orientation) {
-                    in 45..134 -> Surface.ROTATION_270
-                    in 135..224 -> Surface.ROTATION_180
-                    in 225..314 -> Surface.ROTATION_90
-                    else -> Surface.ROTATION_0
-                }
+                targetRotation = androidx.camera.core.UseCase.snapToSurfaceRotation(orientation)
             }
         }
         listener.enable()

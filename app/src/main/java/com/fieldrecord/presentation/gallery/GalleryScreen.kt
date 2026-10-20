@@ -264,7 +264,8 @@ fun GalleryScreen(
                                         painter = rememberAsyncImagePainter(File(photo.filePath)),
                                         contentDescription = photo.fileName,
                                         modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Fit
+                                        contentScale = ContentScale.Crop,
+                                        alignment = Alignment.BottomStart
                                     )
                                     if (firstTag != null && tagColor != null) {
                                         Box(

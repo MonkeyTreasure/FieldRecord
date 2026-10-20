@@ -28,6 +28,19 @@ class VideoWatermarkOrientationTest {
     }
 
     @Test
+    fun landscapeToPortraitRotationChangeRepositionsWatermarkOnEachFrame() {
+        val landscape = videoWatermarkLayout(1920, 1080, 0)
+        val portrait = videoWatermarkLayout(1920, 1080, 90)
+        val landscapeAgain = videoWatermarkLayout(1920, 1080, 0)
+
+        assertEquals(WatermarkBufferEdge.BOTTOM, landscape.bufferEdge)
+        assertEquals(WatermarkBufferEdge.RIGHT, portrait.bufferEdge)
+        assertEquals(1080, portrait.logicalWidth)
+        assertEquals(1920, portrait.logicalHeight)
+        assertEquals(WatermarkBufferEdge.BOTTOM, landscapeAgain.bufferEdge)
+    }
+
+    @Test
     fun upsideDownRotationMovesWatermarkToTopBufferEdge() {
         val layout = videoWatermarkLayout(bufferWidth = 1920, bufferHeight = 1080, rotationDegrees = 180)
 
