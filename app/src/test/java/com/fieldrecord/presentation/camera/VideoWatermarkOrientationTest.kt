@@ -1,6 +1,8 @@
 package com.fieldrecord.presentation.camera
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VideoWatermarkOrientationTest {
@@ -25,6 +27,13 @@ class VideoWatermarkOrientationTest {
         assertEquals(1920, layout.logicalWidth)
         assertEquals(1080, layout.logicalHeight)
         assertEquals(WatermarkBufferEdge.BOTTOM, layout.bufferEdge)
+    }
+
+    @Test
+    fun videoTargetRotationIsLockedWhileRecordingStartsOrRuns() {
+        assertTrue(shouldUpdateVideoTargetRotation(isStarting = false, isRecording = false))
+        assertFalse(shouldUpdateVideoTargetRotation(isStarting = true, isRecording = false))
+        assertFalse(shouldUpdateVideoTargetRotation(isStarting = false, isRecording = true))
     }
 
     @Test

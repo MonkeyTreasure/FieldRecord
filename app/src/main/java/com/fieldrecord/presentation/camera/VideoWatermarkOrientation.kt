@@ -1,5 +1,8 @@
 package com.fieldrecord.presentation.camera
 
+internal fun shouldUpdateVideoTargetRotation(isStarting: Boolean, isRecording: Boolean): Boolean =
+    !isStarting && !isRecording
+
 internal fun watermarkBarHeightPx(width: Int, height: Int): Float =
     (minOf(width, height) * 0.14f).coerceAtLeast(1f)
 
