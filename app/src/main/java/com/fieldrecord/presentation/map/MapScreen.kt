@@ -27,7 +27,13 @@ import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.provider.OpenableColumns
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -88,11 +94,49 @@ fun MapScreen(
     val coroutineScope = rememberCoroutineScope()
     var activeRoute by remember { mutableStateOf<DrivingRoute?>(null) }
     var isRouteLoading by remember { mutableStateOf(false) }
+    var isKmlLoading by remember { mutableStateOf(false) }
     var routeError by remember { mutableStateOf<String?>(null) }
     var selectedGuidePinId by remember { mutableStateOf<Long?>(null) }
     var selectedGuidePhoto by remember { mutableStateOf<FieldPhoto?>(null) }
     var isFollowingLocation by remember { mutableStateOf(false) }
     val selectedGuidePin = temporaryGuidePins.firstOrNull { it.id == selectedGuidePinId }
+    val kmlPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            coroutineScope.launch {
+                isKmlLoading = true
+                routeError = null
+                try {
+                    val displayName = context.contentResolver.query(
+                        uri,
+                        arrayOf(OpenableColumns.DISPLAY_NAME),
+                        null,
+                        null,
+                        null
+                    )?.use { cursor ->
+                        if (cursor.moveToFirst()) cursor.getString(0) else null
+                    } ?: "rute.kml"
+                    require(displayName.endsWith(".kml", ignoreCase = true)) { "Pilih file dengan format .kml" }
+                    val route = withContext(Dispatchers.IO) {
+                        val kmlText = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                            ?: throw IllegalArgumentException("File KML tidak dapat dibuka")
+                        drivingRouteFromKml(parseKmlRouteCoordinates(kmlText), displayName)
+                    }
+                    activeRoute = route
+                    selectedGuidePinId = null
+                    selectedGuidePhoto = null
+                    isFollowingLocation = true
+                    mapLibreMapRef?.let { fitMapToRoute(it, route) }
+                    android.widget.Toast.makeText(context, "Rute KML dimuat: ${formatRouteDistance(route.distanceMeters)}", android.widget.Toast.LENGTH_LONG).show()
+                } catch (error: Exception) {
+                    val message = error.message ?: "File KML tidak dapat dibaca"
+                    routeError = message
+                    android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
+                } finally {
+                    isKmlLoading = false
+                }
+            }
+        }
+    }
     val latestOnGuidePinCreated = rememberUpdatedState<(LatLng) -> Unit>(newValue = { point ->
         val pin = TemporaryGuidePin(System.nanoTime(), point.latitude, point.longitude)
         temporaryGuidePins.add(pin)
@@ -361,12 +405,26 @@ fun MapScreen(
                             )
                         }
                         activeRoute?.let { route ->
-                            map.addPolyline(
-                                PolylineOptions()
-                                    .addAll(route.coordinates.map { LatLng(it.latitude, it.longitude) })
-                                    .color(AndroidColor.rgb(46, 125, 50))
-                                    .width(8f)
-                            )
+                            val progress = currentLocation?.let { location ->
+                                routeProgressMeters(route, RouteCoordinate(location.latitude, location.longitude))
+                            } ?: 0.0
+                            val lineSegments = splitRouteLineAtProgress(route, progress)
+                            if (lineSegments.remaining.size >= 2) {
+                                map.addPolyline(
+                                    PolylineOptions()
+                                        .addAll(lineSegments.remaining.map { LatLng(it.latitude, it.longitude) })
+                                        .color(AndroidColor.rgb(220, 45, 45))
+                                        .width(8f)
+                                )
+                            }
+                            if (lineSegments.traveled.size >= 2) {
+                                map.addPolyline(
+                                    PolylineOptions()
+                                        .addAll(lineSegments.traveled.map { LatLng(it.latitude, it.longitude) })
+                                        .color(AndroidColor.rgb(46, 125, 50))
+                                        .width(8f)
+                                )
+                            }
                         }
                         val filteredPhotos = if (noteSearchQuery.isBlank()) tagFilteredPhotos else noteSearchResults
                         renderPhotoMarkers(map, context, filteredPhotos)
@@ -476,6 +534,35 @@ fun MapScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp),
             horizontalAlignment = Alignment.End
         ) {
+            Surface(
+                modifier = Modifier.clickable(enabled = !isKmlLoading) {
+                    kmlPicker.launch(
+                        arrayOf(
+                            "application/vnd.google-earth.kml+xml",
+                            "application/xml",
+                            "text/xml",
+                            "application/octet-stream"
+                        )
+                    )
+                },
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
+                color = MaterialTheme.colors.surface,
+                elevation = 6.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (isKmlLoading) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Default.FolderOpen, contentDescription = null, tint = LocalAppIconColor.current)
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    Text("Import rute KML", color = MaterialTheme.colors.onSurface, style = MaterialTheme.typography.caption)
+                }
+            }
+
             // Round map-zoom selector, styled like the camera zoom badge, directly above map-layer toggle.
             Box(
                 modifier = Modifier
@@ -670,12 +757,29 @@ fun MapScreen(
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text("Navigasi aktif", style = MaterialTheme.typography.subtitle2, color = MaterialTheme.colors.primary)
-                        Text(nextStep?.instruction ?: "Ikuti rute", style = MaterialTheme.typography.body2, color = MaterialTheme.colors.onSurface)
                         Text(
-                            "${formatRouteDistance(distanceToNext)} · Sisa ${formatRouteDistance(remaining)} · ${formatRouteDuration(etaSeconds)}",
-                            style = MaterialTheme.typography.caption,
-                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.72f)
+                            if (route.isKmlRoute) "Ikuti jalur KML" else nextStep?.instruction ?: "Ikuti rute",
+                            style = MaterialTheme.typography.body2,
+                            color = MaterialTheme.colors.onSurface
                         )
+                        Text(
+                            if (route.isKmlRoute) {
+                                "${route.sourceFileName ?: "Rute KML"} · Sisa ${formatRouteDistance(remaining)}"
+                            } else {
+                                "${formatRouteDistance(distanceToNext)} · Sisa ${formatRouteDistance(remaining)} · ${formatRouteDuration(etaSeconds)}"
+                            },
+                            style = MaterialTheme.typography.caption,
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.72f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (route.isKmlRoute) {
+                            Text(
+                                "Hijau: sudah dilalui · Merah: belum dilalui",
+                                style = MaterialTheme.typography.caption,
+                                color = MaterialTheme.colors.onSurface.copy(alpha = 0.65f)
+                            )
+                        }
                     }
                     IconButton(onClick = {
                         activeRoute = null

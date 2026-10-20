@@ -25,8 +25,35 @@ internal data class DrivingRoute(
     val coordinates: List<RouteCoordinate>,
     val distanceMeters: Double,
     val durationSeconds: Double,
-    val steps: List<NavigationStep>
+    val steps: List<NavigationStep>,
+    val sourceFileName: String? = null,
+    val isKmlRoute: Boolean = false
 )
+
+internal data class RouteLineSegments(
+    val traveled: List<RouteCoordinate>,
+    val remaining: List<RouteCoordinate>
+)
+
+internal fun splitRouteLineAtProgress(route: DrivingRoute, progressMeters: Double): RouteLineSegments {
+    if (route.coordinates.size < 2) return RouteLineSegments(route.coordinates, emptyList())
+    val progress = progressMeters.coerceIn(0.0, route.distanceMeters)
+    var cumulative = 0.0
+    var splitIndex = 0
+    for (index in 0 until route.coordinates.lastIndex) {
+        val segmentLength = distanceMeters(route.coordinates[index], route.coordinates[index + 1])
+        if (progress < cumulative + segmentLength) {
+            splitIndex = index
+            break
+        }
+        cumulative += segmentLength
+        splitIndex = index + 1
+    }
+    return RouteLineSegments(
+        traveled = route.coordinates.take(splitIndex + 1),
+        remaining = route.coordinates.drop(splitIndex)
+    )
+}
 
 internal fun osrmDrivingRouteUrl(origin: RouteCoordinate, destination: RouteCoordinate): String {
     fun coordinate(value: Double) = String.format(Locale.US, "%.6f", value)

@@ -24,6 +24,25 @@ class RouteNavigationTest {
     }
 
     @Test
+    fun routeLineSplitsIntoPassedGreenAndUpcomingRedSegments() {
+        val route = DrivingRoute(
+            coordinates = listOf(
+                RouteCoordinate(0.0, 0.0),
+                RouteCoordinate(0.0, 0.001),
+                RouteCoordinate(0.0, 0.002)
+            ),
+            distanceMeters = 222.4,
+            durationSeconds = 120.0,
+            steps = emptyList()
+        )
+
+        val segments = splitRouteLineAtProgress(route, routeProgressMeters(route, RouteCoordinate(0.0, 0.001)))
+
+        assertEquals(listOf(route.coordinates[0], route.coordinates[1]), segments.traveled)
+        assertEquals(listOf(route.coordinates[1], route.coordinates[2]), segments.remaining)
+    }
+
+    @Test
     fun routeProgressAndNextInstructionAdvanceAlongGeometry() {
         val route = DrivingRoute(
             coordinates = listOf(
