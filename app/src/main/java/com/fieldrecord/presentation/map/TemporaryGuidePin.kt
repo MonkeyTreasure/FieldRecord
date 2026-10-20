@@ -5,6 +5,3 @@ internal data class TemporaryGuidePin(
     val latitude: Double,
     val longitude: Double
 )
-
-internal fun googleNavigationUri(latitude: Double, longitude: Double): String =
-    "google.navigation:q=$latitude,$longitude"

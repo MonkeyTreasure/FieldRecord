@@ -2,9 +2,7 @@ package com.fieldrecord.presentation.map
 
 import android.Manifest
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color as AndroidColor
@@ -60,12 +58,15 @@ import com.google.android.gms.location.*
 import android.location.Location
 import org.maplibre.android.annotations.IconFactory
 import org.maplibre.android.annotations.MarkerOptions
+import org.maplibre.android.annotations.PolylineOptions
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.Style
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 fun MapScreen(
@@ -84,6 +85,10 @@ fun MapScreen(
     var mapViewRef by remember { mutableStateOf<MapView?>(null) }
     var currentLocation by remember { mutableStateOf<LatLng?>(null) }
     val temporaryGuidePins = remember { mutableStateListOf<TemporaryGuidePin>() }
+    val coroutineScope = rememberCoroutineScope()
+    var activeRoute by remember { mutableStateOf<DrivingRoute?>(null) }
+    var isRouteLoading by remember { mutableStateOf(false) }
+    var routeError by remember { mutableStateOf<String?>(null) }
     var selectedGuidePinId by remember { mutableStateOf<Long?>(null) }
     var selectedGuidePhoto by remember { mutableStateOf<FieldPhoto?>(null) }
     var isFollowingLocation by remember { mutableStateOf(false) }
@@ -93,15 +98,21 @@ fun MapScreen(
         temporaryGuidePins.add(pin)
         selectedGuidePinId = pin.id
         selectedGuidePhoto = null
+        activeRoute = null
+        routeError = null
         isFollowingLocation = false
     })
     val latestOnGuidePinSelected = rememberUpdatedState<(Long) -> Unit>(newValue = { pinId ->
         selectedGuidePinId = temporaryGuidePins.firstOrNull { it.id == pinId }?.id
         selectedGuidePhoto = null
+        activeRoute = null
+        routeError = null
     })
     val latestOnGuidePhotoSelected = rememberUpdatedState<(FieldPhoto) -> Unit>(newValue = { photo ->
         selectedGuidePinId = null
         selectedGuidePhoto = photo
+        activeRoute = null
+        routeError = null
     })
     val mapLayerSelection = remember(context) {
         val preferences = context.getSharedPreferences("map_layer_preferences", Context.MODE_PRIVATE)
@@ -349,6 +360,14 @@ fun MapScreen(
                                 MarkerOptions().position(latLng).icon(icon).title("Lokasi Saya")
                             )
                         }
+                        activeRoute?.let { route ->
+                            map.addPolyline(
+                                PolylineOptions()
+                                    .addAll(route.coordinates.map { LatLng(it.latitude, it.longitude) })
+                                    .color(AndroidColor.rgb(46, 125, 50))
+                                    .width(8f)
+                            )
+                        }
                         val filteredPhotos = if (noteSearchQuery.isBlank()) tagFilteredPhotos else noteSearchResults
                         renderPhotoMarkers(map, context, filteredPhotos)
                         temporaryGuidePins.forEach { pin ->
@@ -565,6 +584,20 @@ fun MapScreen(
                             Icon(Icons.Default.Close, contentDescription = "Tutup panduan lokasi")
                         }
                     }
+                    Text(
+                        "Koordinat GPS dan tujuan dikirim ke layanan rute untuk menghitung jalur kendaraan.",
+                        style = MaterialTheme.typography.caption,
+                        color = MaterialTheme.colors.onSurface.copy(alpha = 0.65f)
+                    )
+                    if (routeError != null) {
+                        Text(
+                            routeError.orEmpty(),
+                            color = MaterialTheme.colors.error,
+                            style = MaterialTheme.typography.caption,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End,
@@ -576,11 +609,79 @@ fun MapScreen(
                             }
                             Spacer(Modifier.width(8.dp))
                         }
-                        Button(onClick = { launchGuideToPin(context, target) }) {
+                        Button(
+                            enabled = !isRouteLoading,
+                            onClick = {
+                                val origin = currentLocation
+                                if (origin == null) {
+                                    routeError = "Lokasi GPS belum tersedia"
+                                } else {
+                                    routeError = null
+                                    isRouteLoading = true
+                                    coroutineScope.launch {
+                                        try {
+                                            val route = requestDrivingRoute(
+                                                RouteCoordinate(origin.latitude, origin.longitude),
+                                                RouteCoordinate(target.latitude, target.longitude)
+                                            )
+                                            activeRoute = route
+                                            selectedGuidePinId = null
+                                            selectedGuidePhoto = null
+                                            isFollowingLocation = true
+                                            mapLibreMapRef?.let { fitMapToRoute(it, route) }
+                                        } catch (error: Exception) {
+                                            routeError = error.message ?: "Rute tidak dapat dihitung"
+                                        } finally {
+                                            isRouteLoading = false
+                                        }
+                                    }
+                                }
+                            }
+                        ) {
                             Icon(Icons.Default.Navigation, contentDescription = null)
                             Spacer(Modifier.width(4.dp))
-                            Text("Guide")
+                            Text(if (isRouteLoading) "Mencari rute…" else "Mulai navigasi")
                         }
+                    }
+                }
+            }
+        }
+        activeRoute?.let { route ->
+            val progress = currentLocation?.let { location ->
+                routeProgressMeters(route, RouteCoordinate(location.latitude, location.longitude))
+            } ?: 0.0
+            val remaining = (route.distanceMeters - progress).coerceAtLeast(0.0)
+            val progressRatio = if (route.distanceMeters > 0.0) (progress / route.distanceMeters).coerceIn(0.0, 1.0) else 0.0
+            val etaSeconds = route.durationSeconds * (1.0 - progressRatio)
+            val nextStep = nextNavigationStep(route, progress)
+            val distanceToNext = ((nextStep?.distanceFromStartMeters ?: progress) - progress).coerceAtLeast(0.0)
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(start = 12.dp, end = 88.dp, bottom = 16.dp)
+                    .fillMaxWidth(),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                color = MaterialTheme.colors.surface,
+                elevation = 8.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Navigasi aktif", style = MaterialTheme.typography.subtitle2, color = MaterialTheme.colors.primary)
+                        Text(nextStep?.instruction ?: "Ikuti rute", style = MaterialTheme.typography.body2, color = MaterialTheme.colors.onSurface)
+                        Text(
+                            "${formatRouteDistance(distanceToNext)} · Sisa ${formatRouteDistance(remaining)} · ${formatRouteDuration(etaSeconds)}",
+                            style = MaterialTheme.typography.caption,
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.72f)
+                        )
+                    }
+                    IconButton(onClick = {
+                        activeRoute = null
+                        isFollowingLocation = false
+                    }) {
+                        Icon(Icons.Default.Close, contentDescription = "Hentikan navigasi")
                     }
                 }
             }
@@ -588,23 +689,14 @@ fun MapScreen(
     }
 }
 
-private fun launchGuideToPin(context: Context, pin: TemporaryGuidePin) {
-    val googleNavigation = Intent(
-        Intent.ACTION_VIEW,
-        Uri.parse(googleNavigationUri(pin.latitude, pin.longitude))
-    )
-    try {
-        context.startActivity(googleNavigation)
-    } catch (_: Exception) {
-        val mapsDirections = Intent(
-            Intent.ACTION_VIEW,
-            Uri.parse("https://www.google.com/maps/dir/?api=1&destination=${pin.latitude},${pin.longitude}")
-        )
-        try {
-            context.startActivity(mapsDirections)
-        } catch (_: Exception) {
-            android.widget.Toast.makeText(context, "Tidak ada aplikasi navigasi yang tersedia", android.widget.Toast.LENGTH_LONG).show()
-        }
+private fun fitMapToRoute(map: MapLibreMap, route: DrivingRoute) {
+    if (route.coordinates.isEmpty()) return
+    val boundsBuilder = LatLngBounds.Builder()
+    route.coordinates.forEach { coordinate ->
+        boundsBuilder.include(LatLng(coordinate.latitude, coordinate.longitude))
+    }
+    runCatching {
+        map.animateCamera(CameraUpdateFactory.newLatLngBounds(boundsBuilder.build(), 96))
     }
 }
 
