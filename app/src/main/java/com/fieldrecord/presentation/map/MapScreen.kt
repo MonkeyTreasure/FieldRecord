@@ -98,6 +98,7 @@ fun MapScreen(
     var isKmlLoading by remember { mutableStateOf(false) }
     var routeError by remember { mutableStateOf<String?>(null) }
     var selectedGuidePinId by remember { mutableStateOf<Long?>(null) }
+    var pinToDeleteId by remember { mutableStateOf<Long?>(null) }
     var selectedGuidePhoto by remember { mutableStateOf<FieldPhoto?>(null) }
     var isFollowingLocation by remember { mutableStateOf(false) }
     val selectedGuidePin = temporaryGuidePins.firstOrNull { it.id == selectedGuidePinId }
@@ -144,10 +145,15 @@ fun MapScreen(
         isFollowingLocation = false
     })
     val latestOnGuidePinSelected = rememberUpdatedState<(Long) -> Unit>(newValue = { pinId ->
-        selectedGuidePinId = temporaryGuidePins.firstOrNull { it.id == pinId }?.id
-        selectedGuidePhoto = null
-        activeRoute = null
-        routeError = null
+        when (temporaryGuidePinTapAction(selectedGuidePinId, pinId)) {
+            TemporaryGuidePinTapAction.REQUEST_DELETE -> pinToDeleteId = pinId
+            TemporaryGuidePinTapAction.SELECT -> {
+                selectedGuidePinId = temporaryGuidePins.firstOrNull { it.id == pinId }?.id
+                selectedGuidePhoto = null
+                activeRoute = null
+                routeError = null
+            }
+        }
     })
     val latestOnGuidePhotoSelected = rememberUpdatedState<(FieldPhoto) -> Unit>(newValue = { photo ->
         selectedGuidePinId = null
@@ -787,6 +793,34 @@ fun MapScreen(
                         Icon(Icons.Default.Close, contentDescription = "Hentikan navigasi")
                     }
                 }
+            }
+        }
+        pinToDeleteId?.let { pinId ->
+            val pin = temporaryGuidePins.firstOrNull { it.id == pinId }
+            if (pin != null) {
+                AlertDialog(
+                    onDismissRequest = { pinToDeleteId = null },
+                    title = { Text("Hapus pin peta?") },
+                    text = {
+                        Text(
+                            "Hapus pin sementara di ${String.format(Locale.US, "%.5f, %.5f", pin.latitude, pin.longitude)}?"
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            temporaryGuidePins.removeAll { it.id == pinId }
+                            if (selectedGuidePinId == pinId) selectedGuidePinId = null
+                            pinToDeleteId = null
+                        }) {
+                            Text("Hapus pin")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { pinToDeleteId = null }) {
+                            Text("Batal")
+                        }
+                    }
+                )
             }
         }
         pendingKmlRoute?.let { route ->
