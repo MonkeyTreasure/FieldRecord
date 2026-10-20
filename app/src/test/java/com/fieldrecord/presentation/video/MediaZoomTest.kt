@@ -1,9 +1,17 @@
 package com.fieldrecord.presentation.video
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MediaZoomTest {
+    @Test
+    fun gallerySwipeNavigationIsEnabledOnlyAtFitScale() {
+        assertTrue(shouldNavigateGallerySwipe(1f))
+        assertFalse(shouldNavigateGallerySwipe(2f))
+    }
+
     @Test
     fun pinchZoomScalesAndKeepsPanInsideImageBounds() {
         val zoom = updateMediaZoom(

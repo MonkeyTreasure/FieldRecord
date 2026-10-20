@@ -1,5 +1,7 @@
 package com.fieldrecord.presentation.video
 
+internal fun shouldNavigateGallerySwipe(zoomScale: Float): Boolean = zoomScale <= 1.001f
+
 internal data class MediaZoomTransform(
     val scale: Float = 1f,
     val offsetX: Float = 0f,

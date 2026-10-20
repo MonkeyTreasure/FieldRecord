@@ -3,11 +3,13 @@ package com.fieldrecord.presentation.photo
 import android.content.ClipData
 import android.content.Intent
 import androidx.core.content.FileProvider
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.horizontalScroll
@@ -32,10 +34,12 @@ import androidx.compose.ui.geometry.isSpecified
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -54,6 +58,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Locale
 import com.fieldrecord.presentation.video.MediaZoomTransform
+import com.fieldrecord.presentation.video.shouldNavigateGallerySwipe
 import com.fieldrecord.presentation.video.updateMediaZoom
 import kotlinx.coroutines.launch
 
@@ -70,6 +75,7 @@ private val Emerald = Color(0xFF673AB7)
  *   Note (lebar = layar, tombol +/edit kanan)
  *   [ruang fleksibel]
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PhotoFullscreenViewer(
     photos: List<FieldPhoto>,
@@ -87,6 +93,20 @@ fun PhotoFullscreenViewer(
     var dragDistance by remember { mutableFloatStateOf(0f) }
     val photo = photos[currentIndex.coerceIn(0, photos.lastIndex)]
     val photoZoomState = remember(photo.filePath) { mutableStateOf(MediaZoomTransform()) }
+    val photoViewportSize = remember(photo.filePath) { mutableStateOf(IntSize.Zero) }
+    val photoTransformableState = rememberTransformableState { zoomChange, panChange, _ ->
+        val viewport = photoViewportSize.value
+        photoZoomState.value = updateMediaZoom(
+            current = photoZoomState.value,
+            zoomChange = zoomChange,
+            panX = panChange.x,
+            panY = panChange.y,
+            centroidX = viewport.width / 2f,
+            centroidY = viewport.height / 2f,
+            viewportWidth = viewport.width.toFloat(),
+            viewportHeight = viewport.height.toFloat()
+        )
+    }
     var displayedNote by remember(photo.id, photo.note) { mutableStateOf(photo.note) }
     var showNoteEditor by remember(photo.id) { mutableStateOf(false) }
     var noteDraft by remember(photo.id) { mutableStateOf(photo.note.orEmpty()) }
@@ -116,7 +136,7 @@ fun PhotoFullscreenViewer(
     val swipeModifier = Modifier.pointerInput(photos.size, currentIndex) {
         detectHorizontalDragGestures(
             onDragEnd = {
-                if (kotlin.math.abs(dragDistance) > 60f) {
+                if (shouldNavigateGallerySwipe(photoZoomState.value.scale) && kotlin.math.abs(dragDistance) > 60f) {
                     // Geser kanan = sebelumnya, geser kiri = berikutnya.
                     currentIndex = if (dragDistance < 0f) {
                         (currentIndex + 1).coerceAtMost(photos.lastIndex)
@@ -126,7 +146,9 @@ fun PhotoFullscreenViewer(
                 }
                 dragDistance = 0f
             },
-            onHorizontalDrag = { _, amount -> dragDistance += amount }
+            onHorizontalDrag = { _, amount ->
+                if (shouldNavigateGallerySwipe(photoZoomState.value.scale)) dragDistance += amount
+            }
         )
     }
 
@@ -159,21 +181,12 @@ fun PhotoFullscreenViewer(
                         .weight(1f, fill = false)
                         .aspectRatio(ratio)
                         .clipToBounds()
+                        .onSizeChanged { photoViewportSize.value = it }
+                        .transformable(
+                            state = photoTransformableState,
+                            canPan = { !shouldNavigateGallerySwipe(photoZoomState.value.scale) }
+                        )
                         .pointerInput(photo.filePath) { detectTapGestures { } }
-                        .pointerInput(photo.filePath) {
-                            detectTransformGestures { centroid, pan, zoomChange, _ ->
-                                photoZoomState.value = updateMediaZoom(
-                                    current = photoZoomState.value,
-                                    zoomChange = zoomChange,
-                                    panX = pan.x,
-                                    panY = pan.y,
-                                    centroidX = centroid.x,
-                                    centroidY = centroid.y,
-                                    viewportWidth = size.width.toFloat(),
-                                    viewportHeight = size.height.toFloat()
-                                )
-                            }
-                        }
                 ) {
                     Image(
                         painter = painter,
