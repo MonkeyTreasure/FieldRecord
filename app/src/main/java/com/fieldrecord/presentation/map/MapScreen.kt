@@ -85,16 +85,23 @@ fun MapScreen(
     var currentLocation by remember { mutableStateOf<LatLng?>(null) }
     val temporaryGuidePins = remember { mutableStateListOf<TemporaryGuidePin>() }
     var selectedGuidePinId by remember { mutableStateOf<Long?>(null) }
+    var selectedGuidePhoto by remember { mutableStateOf<FieldPhoto?>(null) }
     var isFollowingLocation by remember { mutableStateOf(false) }
     val selectedGuidePin = temporaryGuidePins.firstOrNull { it.id == selectedGuidePinId }
     val latestOnGuidePinCreated = rememberUpdatedState<(LatLng) -> Unit>(newValue = { point ->
         val pin = TemporaryGuidePin(System.nanoTime(), point.latitude, point.longitude)
         temporaryGuidePins.add(pin)
         selectedGuidePinId = pin.id
+        selectedGuidePhoto = null
         isFollowingLocation = false
     })
     val latestOnGuidePinSelected = rememberUpdatedState<(Long) -> Unit>(newValue = { pinId ->
         selectedGuidePinId = temporaryGuidePins.firstOrNull { it.id == pinId }?.id
+        selectedGuidePhoto = null
+    })
+    val latestOnGuidePhotoSelected = rememberUpdatedState<(FieldPhoto) -> Unit>(newValue = { photo ->
+        selectedGuidePinId = null
+        selectedGuidePhoto = photo
     })
     val mapLayerSelection = remember(context) {
         val preferences = context.getSharedPreferences("map_layer_preferences", Context.MODE_PRIVATE)
@@ -306,7 +313,7 @@ fun MapScreen(
                                                         markerTitle.startsWith("photo:") -> {
                                                             val photoId = markerTitle.removePrefix("photo:").toLongOrNull()
                                                             val photo = latestPhotos.firstOrNull { it.id == photoId }
-                                                            if (photo != null) latestOnPhotoClick(photo)
+                                                            if (photo != null) latestOnGuidePhotoSelected.value(photo)
                                                             true
                                                         }
                                                         markerTitle.startsWith("cluster:") -> {
@@ -522,7 +529,12 @@ fun MapScreen(
             }
         }
 
-        selectedGuidePin?.let { pin ->
+        val photoGuideTarget = selectedGuidePhoto?.let { photo ->
+            TemporaryGuidePin(photo.id, photo.latitude, photo.longitude)
+        }
+        val guideTarget = selectedGuidePin ?: photoGuideTarget
+        guideTarget?.let { target ->
+            val photo = selectedGuidePhoto
             Surface(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -532,25 +544,43 @@ fun MapScreen(
                 color = MaterialTheme.colors.surface,
                 elevation = 8.dp
             ) {
-                Row(
-                    modifier = Modifier.padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Pin tujuan", style = MaterialTheme.typography.subtitle2, color = MaterialTheme.colors.onSurface)
-                        Text(
-                            String.format(Locale.US, "%.6f, %.6f", pin.latitude, pin.longitude),
-                            style = MaterialTheme.typography.caption,
-                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.72f)
-                        )
+                Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                if (photo == null) "Pin tujuan" else "Lokasi foto",
+                                style = MaterialTheme.typography.subtitle2,
+                                color = MaterialTheme.colors.onSurface
+                            )
+                            Text(
+                                String.format(Locale.US, "%.6f, %.6f", target.latitude, target.longitude),
+                                style = MaterialTheme.typography.caption,
+                                color = MaterialTheme.colors.onSurface.copy(alpha = 0.72f)
+                            )
+                        }
+                        IconButton(onClick = {
+                            selectedGuidePinId = null
+                            selectedGuidePhoto = null
+                        }) {
+                            Icon(Icons.Default.Close, contentDescription = "Tutup panduan lokasi")
+                        }
                     }
-                    IconButton(onClick = { selectedGuidePinId = null }) {
-                        Icon(Icons.Default.Close, contentDescription = "Tutup panduan pin")
-                    }
-                    Button(onClick = { launchGuideToPin(context, pin) }) {
-                        Icon(Icons.Default.Navigation, contentDescription = null)
-                        Spacer(Modifier.width(4.dp))
-                        Text("Guide")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (photo != null) {
+                            TextButton(onClick = { latestOnPhotoClick(photo) }) {
+                                Text("Buka foto")
+                            }
+                            Spacer(Modifier.width(8.dp))
+                        }
+                        Button(onClick = { launchGuideToPin(context, target) }) {
+                            Icon(Icons.Default.Navigation, contentDescription = null)
+                            Spacer(Modifier.width(4.dp))
+                            Text("Guide")
+                        }
                     }
                 }
             }
