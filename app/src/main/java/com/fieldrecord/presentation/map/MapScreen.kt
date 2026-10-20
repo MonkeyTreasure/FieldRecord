@@ -532,31 +532,33 @@ fun MapScreen(
             horizontalAlignment = Alignment.End
         ) {
             Surface(
-                modifier = Modifier.clickable(enabled = !isKmlLoading) {
-                    kmlPicker.launch(
-                        arrayOf(
-                            "application/vnd.google-earth.kml+xml",
-                            "application/xml",
-                            "text/xml",
-                            "application/octet-stream"
+                modifier = Modifier
+                    .size(56.dp)
+                    .border(1.5.dp, Color.White, CircleShape)
+                    .clickable(enabled = !isKmlLoading) {
+                        kmlPicker.launch(
+                            arrayOf(
+                                "application/vnd.google-earth.kml+xml",
+                                "application/xml",
+                                "text/xml",
+                                "application/octet-stream"
+                            )
                         )
-                    )
-                },
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
+                    },
+                shape = CircleShape,
                 color = MaterialTheme.colors.surface,
                 elevation = 6.dp
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     if (isKmlLoading) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                     } else {
-                        Icon(Icons.Default.FolderOpen, contentDescription = null, tint = LocalAppIconColor.current)
+                        Icon(
+                            Icons.Default.FolderOpen,
+                            contentDescription = "Import rute KML",
+                            tint = LocalAppIconColor.current
+                        )
                     }
-                    Spacer(Modifier.width(6.dp))
-                    Text("Import rute KML", color = MaterialTheme.colors.onSurface, style = MaterialTheme.typography.caption)
                 }
             }
 
