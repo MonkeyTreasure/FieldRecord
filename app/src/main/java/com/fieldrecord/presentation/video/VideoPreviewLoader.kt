@@ -8,7 +8,7 @@ import java.io.File
 
 internal data class VideoPreviewInfo(val bitmap: Bitmap?, val durationMs: Long)
 
-internal fun loadVideoPreview(file: File): VideoPreviewInfo? {
+internal fun loadVideoPreview(file: File, additionalRotationDegrees: Int = 0): VideoPreviewInfo? {
     if (!file.isFile || file.length() == 0L) return null
     val retriever = MediaMetadataRetriever()
     return try {
@@ -20,7 +20,9 @@ internal fun loadVideoPreview(file: File): VideoPreviewInfo? {
         } else {
             retriever.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)?.let(::scaleBitmap)
         }
-        val frame = rawFrame?.let { rotateFrame(it, rotation) }
+        val frame = rawFrame?.let {
+            rotateFrame(it, adjustedVideoThumbnailRotation(rotation, additionalRotationDegrees))
+        }
         VideoPreviewInfo(frame, duration)
     } catch (_: Exception) {
         null

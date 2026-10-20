@@ -46,7 +46,9 @@ internal fun GalleryVideoTile(
     onLongClick: () -> Unit
 ) {
     val preview by produceState<VideoPreviewInfo?>(initialValue = null, key1 = video.filePath) {
-        value = withContext(Dispatchers.IO) { loadVideoPreview(File(video.filePath)) }
+        value = withContext(Dispatchers.IO) {
+            loadVideoPreview(File(video.filePath), additionalRotationDegrees = 90)
+        }
     }
     val thumbnail = preview?.bitmap
     DisposableEffect(thumbnail) {
