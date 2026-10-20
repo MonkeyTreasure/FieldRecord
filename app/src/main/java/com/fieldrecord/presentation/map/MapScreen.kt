@@ -93,6 +93,7 @@ fun MapScreen(
     val temporaryGuidePins = remember { mutableStateListOf<TemporaryGuidePin>() }
     val coroutineScope = rememberCoroutineScope()
     var activeRoute by remember { mutableStateOf<DrivingRoute?>(null) }
+    var pendingKmlRoute by remember { mutableStateOf<DrivingRoute?>(null) }
     var isRouteLoading by remember { mutableStateOf(false) }
     var isKmlLoading by remember { mutableStateOf(false) }
     var routeError by remember { mutableStateOf<String?>(null) }
@@ -121,12 +122,8 @@ fun MapScreen(
                             ?: throw IllegalArgumentException("File KML tidak dapat dibuka")
                         drivingRouteFromKml(parseKmlRouteCoordinates(kmlText), displayName)
                     }
-                    activeRoute = route
-                    selectedGuidePinId = null
-                    selectedGuidePhoto = null
-                    isFollowingLocation = true
-                    mapLibreMapRef?.let { fitMapToRoute(it, route) }
-                    android.widget.Toast.makeText(context, "Rute KML dimuat: ${formatRouteDistance(route.distanceMeters)}", android.widget.Toast.LENGTH_LONG).show()
+                    pendingKmlRoute = route
+                    android.widget.Toast.makeText(context, "Rute KML siap untuk ditinjau", android.widget.Toast.LENGTH_LONG).show()
                 } catch (error: Exception) {
                     val message = error.message ?: "File KML tidak dapat dibaca"
                     routeError = message
@@ -789,6 +786,40 @@ fun MapScreen(
                     }
                 }
             }
+        }
+        pendingKmlRoute?.let { route ->
+            val start = route.coordinates.first()
+            val end = route.coordinates.last()
+            AlertDialog(
+                onDismissRequest = { pendingKmlRoute = null },
+                title = { Text("Tinjau rute KML") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(route.sourceFileName ?: "Rute KML")
+                        Text("Jarak jalur: ${formatRouteDistance(route.distanceMeters)}")
+                        Text("Awal: ${String.format(Locale.US, "%.5f, %.5f", start.latitude, start.longitude)}")
+                        Text("Tujuan: ${String.format(Locale.US, "%.5f, %.5f", end.latitude, end.longitude)}")
+                        Text("File KML tidak menyediakan instruksi belokan atau ETA.")
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        activeRoute = route
+                        pendingKmlRoute = null
+                        selectedGuidePinId = null
+                        selectedGuidePhoto = null
+                        isFollowingLocation = true
+                        mapLibreMapRef?.let { fitMapToRoute(it, route) }
+                    }) {
+                        Text("Mulai navigasi")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingKmlRoute = null }) {
+                        Text("Batal")
+                    }
+                }
+            )
         }
     }
 }
