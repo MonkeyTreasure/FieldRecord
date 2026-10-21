@@ -28,6 +28,10 @@ import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -60,6 +64,8 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Locale
 import com.fieldrecord.location.LocationKalmanFilter
+import com.fieldrecord.location.elapsedTrackMillis
+import com.fieldrecord.data.local.entity.TrackSessionEntity
 import com.google.android.gms.location.*
 import android.location.Location
 import org.maplibre.android.annotations.IconFactory
@@ -83,7 +89,12 @@ fun MapScreen(
     onSavePhotoNote: suspend (Long, String?) -> Unit,
     tagFilter: PhotoTagFilter? = null,
     onClearTagFilter: () -> Unit = {},
-    mapOpenRequest: Int = 0
+    mapOpenRequest: Int = 0,
+    trackSnapshot: TrackSnapshot? = null,
+    onStartTracking: () -> Unit = {},
+    onPauseTracking: () -> Unit = {},
+    onResumeTracking: () -> Unit = {},
+    onStopTracking: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -101,7 +112,26 @@ fun MapScreen(
     var pinToDeleteId by remember { mutableStateOf<Long?>(null) }
     var selectedGuidePhoto by remember { mutableStateOf<FieldPhoto?>(null) }
     var isFollowingLocation by remember { mutableStateOf(false) }
+    var trackingNow by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var showTrackStopConfirmation by remember { mutableStateOf(false) }
+    var dismissedTrackSessionId by remember { mutableStateOf<Long?>(null) }
+    val trackStatus = trackSnapshot?.session?.status
+    val isTrackRunning = trackStatus == TrackSessionEntity.STATUS_RECORDING
+    val isTrackPaused = trackStatus == TrackSessionEntity.STATUS_PAUSED
+    val hasActiveTrack = isTrackRunning || isTrackPaused
+    val showTrackStatusPanel = trackSnapshot != null && dismissedTrackSessionId != trackSnapshot.session.id
     val selectedGuidePin = temporaryGuidePins.firstOrNull { it.id == selectedGuidePinId }
+
+    LaunchedEffect(trackSnapshot?.session?.id, trackStatus) {
+        if (isTrackRunning || isTrackPaused) {
+            while (true) {
+                trackingNow = System.currentTimeMillis()
+                delay(1_000L)
+            }
+        } else {
+            trackingNow = System.currentTimeMillis()
+        }
+    }
     val kmlPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             coroutineScope.launch {
@@ -407,6 +437,19 @@ fun MapScreen(
                                 MarkerOptions().position(latLng).icon(icon).title("Lokasi Saya")
                             )
                         }
+                        trackSnapshot?.points
+                            ?.groupBy { it.segmentIndex }
+                            ?.values
+                            ?.forEach { segmentPoints ->
+                                if (segmentPoints.size >= 2) {
+                                    map.addPolyline(
+                                        PolylineOptions()
+                                            .addAll(segmentPoints.map { LatLng(it.latitude, it.longitude) })
+                                            .color(AndroidColor.rgb(126, 87, 194))
+                                            .width(7f)
+                                    )
+                                }
+                            }
                         activeRoute?.let { route ->
                             val progress = currentLocation?.let { location ->
                                 routeProgressMeters(route, RouteCoordinate(location.latitude, location.longitude))
@@ -537,6 +580,35 @@ fun MapScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp),
             horizontalAlignment = Alignment.End
         ) {
+            FloatingActionButton(
+                onClick = {
+                    when {
+                        isTrackRunning -> onPauseTracking()
+                        isTrackPaused -> onResumeTracking()
+                        else -> onStartTracking()
+                    }
+                },
+                backgroundColor = when {
+                    isTrackRunning -> Color(0xFFD32F2F)
+                    isTrackPaused -> Color(0xFFFFB300)
+                    else -> MaterialTheme.colors.surface
+                },
+                contentColor = if (hasActiveTrack) Color.White else Color(0xFFD32F2F)
+            ) {
+                Icon(
+                    imageVector = when {
+                        isTrackRunning -> Icons.Default.Pause
+                        isTrackPaused -> Icons.Default.PlayArrow
+                        else -> Icons.Default.FiberManualRecord
+                    },
+                    contentDescription = when {
+                        isTrackRunning -> "Jeda perekaman track"
+                        isTrackPaused -> "Lanjutkan perekaman track"
+                        else -> "Mulai perekaman track"
+                    }
+                )
+            }
+
             Surface(
                 modifier = Modifier
                     .size(56.dp)
@@ -637,6 +709,64 @@ fun MapScreen(
                     Icons.Default.MyLocation,
                     contentDescription = if (isFollowingLocation) "Mengikuti lokasi aktif; geser peta untuk menjelajah" else "Pusatkan lokasi; ikuti lokasi saya"
                 )
+            }
+        }
+
+        trackSnapshot?.takeIf { dismissedTrackSessionId != it.session.id }?.let { snapshot ->
+            val session = snapshot.session
+            val elapsed = elapsedTrackMillis(session, trackingNow)
+            val latestFix = snapshot.points.lastOrNull()
+            val currentSpeed = latestFix?.speedMetersPerSecond?.coerceAtLeast(0f)?.times(3.6f) ?: 0f
+            val averageSpeed = if (elapsed > 0L) session.distanceMeters / (elapsed / 3_600_000.0) else 0.0
+            val statusLabel = when (session.status) {
+                TrackSessionEntity.STATUS_RECORDING -> "TRACK SEDANG DIREKAM"
+                TrackSessionEntity.STATUS_PAUSED -> "TRACK DIJEDA"
+                else -> "TRACK TERSIMPAN"
+            }
+            val statusColor = when (session.status) {
+                TrackSessionEntity.STATUS_RECORDING -> Color(0xFFD32F2F)
+                TrackSessionEntity.STATUS_PAUSED -> Color(0xFFFFB300)
+                else -> MaterialTheme.colors.primary
+            }
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(start = 12.dp, end = 88.dp, bottom = if (activeRoute != null) 126.dp else 16.dp)
+                    .fillMaxWidth(),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                color = MaterialTheme.colors.surface,
+                elevation = 8.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(start = 14.dp, end = 4.dp, top = 9.dp, bottom = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(statusLabel, style = MaterialTheme.typography.subtitle2, color = statusColor)
+                        Text(
+                            "${formatTrackElapsed(elapsed)} · ${formatRouteDistance(session.distanceMeters)}",
+                            style = MaterialTheme.typography.body2,
+                            color = MaterialTheme.colors.onSurface
+                        )
+                        Text(
+                            "${formatTrackSpeed(currentSpeed.toDouble())} km/j · Rata-rata ${formatTrackSpeed(averageSpeed)} km/j" +
+                                if (latestFix == null) " · Menunggu GPS akurat" else "",
+                            style = MaterialTheme.typography.caption,
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.72f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    IconButton(onClick = {
+                        if (hasActiveTrack) showTrackStopConfirmation = true
+                        else dismissedTrackSessionId = session.id
+                    }) {
+                        Icon(
+                            imageVector = if (hasActiveTrack) Icons.Default.Stop else Icons.Default.Close,
+                            contentDescription = if (hasActiveTrack) "Simpan dan hentikan track" else "Tutup ringkasan track"
+                        )
+                    }
+                }
             }
         }
 
@@ -750,7 +880,7 @@ fun MapScreen(
             Surface(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(start = 12.dp, end = 88.dp, bottom = 16.dp)
+                    .padding(start = 12.dp, end = 88.dp, bottom = if (showTrackStatusPanel) 126.dp else 16.dp)
                     .fillMaxWidth(),
                 shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
                 color = MaterialTheme.colors.surface,
@@ -794,6 +924,32 @@ fun MapScreen(
                     }
                 }
             }
+        }
+        if (showTrackStopConfirmation) {
+            AlertDialog(
+                onDismissRequest = { showTrackStopConfirmation = false },
+                title = { Text("Simpan track?", color = Color.White) },
+                text = {
+                    Text(
+                        "Rekaman dihentikan dan track disimpan di perangkat.",
+                        color = Color.White
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        onStopTracking()
+                        showTrackStopConfirmation = false
+                    }) {
+                        Text("Simpan & hentikan", color = Color.White)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showTrackStopConfirmation = false }) {
+                        Text("Lanjut merekam", color = Color.White)
+                    }
+                },
+                contentColor = Color.White
+            )
         }
         pinToDeleteId?.let { pinId ->
             val pin = temporaryGuidePins.firstOrNull { it.id == pinId }
@@ -861,6 +1017,17 @@ fun MapScreen(
         }
     }
 }
+
+private fun formatTrackElapsed(durationMillis: Long): String {
+    val totalSeconds = (durationMillis / 1_000L).coerceAtLeast(0L)
+    val hours = totalSeconds / 3_600L
+    val minutes = (totalSeconds % 3_600L) / 60L
+    val seconds = totalSeconds % 60L
+    return String.format(Locale.US, "%02d:%02d:%02d", hours, minutes, seconds)
+}
+
+private fun formatTrackSpeed(speedKmh: Double): String =
+    String.format(Locale.US, "%.1f", speedKmh.coerceAtLeast(0.0))
 
 private fun fitMapToRoute(map: MapLibreMap, route: DrivingRoute) {
     if (route.coordinates.isEmpty()) return

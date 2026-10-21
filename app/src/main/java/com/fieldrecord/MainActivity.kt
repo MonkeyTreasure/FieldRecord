@@ -107,6 +107,28 @@ class MainActivity : ComponentActivity() {
         if (hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)) LocationTrackingService.start(this)
     }
 
+    private val trackingNotificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (!granted) {
+            android.widget.Toast.makeText(
+                this,
+                "Izin notifikasi ditolak; status perekaman tetap tersedia di kontrol aplikasi aktif Android.",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+        }
+        LocationTrackingService.startTrackRecording(this)
+    }
+
+    private fun requestTrackStart() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            !hasPermission(Manifest.permission.POST_NOTIFICATIONS)) {
+            trackingNotificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            LocationTrackingService.startTrackRecording(this)
+        }
+    }
+
     private fun hasPermission(p: String) = ContextCompat.checkSelfPermission(this, p) == PackageManager.PERMISSION_GRANTED
     private fun allCriticalGranted() = hasPermission(Manifest.permission.CAMERA) && hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)
     private fun hasSharedStorageAccess() = Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
@@ -127,7 +149,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             FieldRecordTheme {
                 val granted by permissionsGranted
-                if (granted) MainScreen() else PermissionScreen(
+                if (granted) MainScreen(onStartTracking = ::requestTrackStart) else PermissionScreen(
                     onRequest = { permissionLauncher.launch(requiredPermissions) },
                     onStorageAccess = ::openSharedStorageSettings,
                     storageAccessMissing = allCriticalGranted() && !hasSharedStorageAccess()
@@ -426,11 +448,12 @@ private fun PermissionCheckItem(title: String, description: String, isGranted: B
 private data class NavItem(val label: String, val icon: ImageVector, val route: String)
 
 @Composable
-fun MainScreen() {
+fun MainScreen(onStartTracking: () -> Unit) {
     val navController = rememberNavController()
     val screenScope = rememberCoroutineScope()
     val mapViewModel: MapViewModel = hiltViewModel()
     val photos by mapViewModel.photos.collectAsStateWithLifecycle()
+    val latestTrack by mapViewModel.latestTrack.collectAsStateWithLifecycle()
     val tagFacets = remember(photos) { collectPhotoTagFacets(photos.map { it.note }) }
     val hasDashboardTags = !tagFacets.isEmpty
     var selectedTagFilter by remember { mutableStateOf<PhotoTagFilter?>(null) }
@@ -543,6 +566,11 @@ fun MainScreen() {
                         photos = photos,
                         tagFilter = selectedTagFilter,
                         mapOpenRequest = mapOpenRequest,
+                        trackSnapshot = latestTrack,
+                        onStartTracking = onStartTracking,
+                        onPauseTracking = { LocationTrackingService.pauseTrackRecording(context) },
+                        onResumeTracking = { LocationTrackingService.resumeTrackRecording(context) },
+                        onStopTracking = { LocationTrackingService.stopTrackRecording(context) },
                         onClearTagFilter = { selectedTagFilter = null },
                         onPhotoClick = { photo ->
                             selectedPhotoList = listOf(photo)

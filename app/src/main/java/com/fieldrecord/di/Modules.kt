@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import com.fieldrecord.data.local.db.FieldRecordDatabase
 import com.fieldrecord.data.local.dao.FieldPhotoDao
+import com.fieldrecord.data.local.dao.TrackDao
 import com.fieldrecord.data.repository.FieldPhotoRepositoryImpl
 import com.fieldrecord.domain.repository.FieldPhotoRepository
 import com.fieldrecord.presentation.camera.CameraViewModel
@@ -26,6 +27,11 @@ object DatabaseModule {
     @Provides
     fun provideDao(database: FieldRecordDatabase): FieldPhotoDao {
         return database.fieldPhotoDao()
+    }
+
+    @Provides
+    fun provideTrackDao(database: FieldRecordDatabase): TrackDao {
+        return database.trackDao()
     }
 }
 
