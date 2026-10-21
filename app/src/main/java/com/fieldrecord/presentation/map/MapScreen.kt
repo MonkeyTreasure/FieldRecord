@@ -800,10 +800,11 @@ fun MapScreen(
             if (pin != null) {
                 AlertDialog(
                     onDismissRequest = { pinToDeleteId = null },
-                    title = { Text("Hapus pin peta?") },
+                    title = { Text("Hapus pin peta?", color = Color.White) },
                     text = {
                         Text(
-                            "Hapus pin sementara di ${String.format(Locale.US, "%.5f, %.5f", pin.latitude, pin.longitude)}?"
+                            "Hapus pin sementara di ${String.format(Locale.US, "%.5f, %.5f", pin.latitude, pin.longitude)}?",
+                            color = Color.White
                         )
                     },
                     confirmButton = {
@@ -812,14 +813,15 @@ fun MapScreen(
                             if (selectedGuidePinId == pinId) selectedGuidePinId = null
                             pinToDeleteId = null
                         }) {
-                            Text("Hapus pin")
+                            Text("Hapus pin", color = Color.White)
                         }
                     },
                     dismissButton = {
                         TextButton(onClick = { pinToDeleteId = null }) {
-                            Text("Batal")
+                            Text("Batal", color = Color.White)
                         }
-                    }
+                    },
+                    contentColor = Color.White
                 )
             }
         }
